@@ -3,7 +3,7 @@
 import json
 import os
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -84,9 +84,8 @@ for r in dataset:
 # index by dtCode -> list of meterId
 _by_dt: Dict[str, List[str]] = {}
 for r in dataset:
-    _by_ct = r.get("hierarchy", {}).get("dt", {})
-    dt_code = _ct.get("code", "")
-    _by_ct.setdefault(dt_code, []).append(r["meterId"])
+    dt_code = r.get("dtCode", "")
+    _by_dt.setdefault(dt_code, []).append(r["meterId"])
 
 # index by zone code -> list of meterId
 _by_zone: Dict[str, List[str]] = {}
@@ -175,6 +174,7 @@ app = FastAPI(
     description="Read‑only API over the Flock Energy meter operations dataset.",
     version="1.0.0",
 )
+
 
 @app.get("/health", include_in_schema=False)
 async def health() -> Dict[str, str]:
@@ -267,9 +267,6 @@ async def list_meters(
     if zone_code and division_code:
         # When both zone and division are provided, intersect the two lists
         meter_ids = [mid for mid in meter_ids if mid in _by_division.get(division_code, [])]
-    # Note: circle, subdivision, substation, feeder filters can be added
-    # following the same pattern; they are omitted from the minimal
-    # implementation but the index tables (_by_circle, etc.) are pre‑built.
 
     # Search filter (applied after the above so it can further narrow results)
     if search:
@@ -293,18 +290,6 @@ async def list_meters(
         "per_page": paginated["per_page"],
         "total_pages": paginated["total_pages"],
     }
-
-
-@app.get("/api/meters/{meter_id}", response_model=dict)
-async def get_meter(meter_id: str) -> Dict[str, Any]:
-    """Retrieve a single meter's full metadata record.
-
-    Returns a 404 response if the meterId does not exist in the dataset.
-    """
-    record = _by_id.get(meter_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Meter not found")
-    return _full_record(record)
 
 
 @app.get("/api/meters/search", response_model=dict)
@@ -413,7 +398,435 @@ async def export_meters() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Global exception handler so we never expose stack traces/secrets
+# Metadata endpoint
+# ---------------------------------------------------------------------------
+
+@app.get("/api/metadata", response_model=dict)
+async def get_metadata() -> Dict[str, Any]:
+    """Get data source metadata and freshness information.
+
+    Returns metadata about the meter dataset including:
+    - Record count
+    - Source filename
+    - File modification time (local file system metadata)
+    - Freshness policy
+
+    This endpoint does not connect to the live portal and does not
+    provide real-time data. All data comes from the static export
+    file meter-export.json alongside the API code.
+    """
+    import datetime
+    file_path = os.path.join(os.path.dirname(__file__), "meter-export.json")
+    stat = os.stat(file_path)
+    mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+    return {
+        "record_count": TOTAL_RECORDS,
+        "source_file": "meter-export.json",
+        "file_modification_time": mtime.isoformat(),
+        "freshness": {
+            "policy": "static_export",
+            "description": "Data comes from a static export file; no live portal connection.",
+            "last_updated": None
+        },
+        "dataset": {
+            "phase_types": list(set(r.get("phaseType") for r in dataset)),
+            "statuses": list(set(r.get("installStatus") for r in dataset)),
+            "makes": list(set(r.get("make") for r in dataset)),
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Nearby meters endpoint (Haversine formula)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/meters/nearby", response_model=dict)
+async def nearby_meters(
+    latitude: float = Query(..., description="Latitude in decimal degrees, -90 to 90"),
+    longitude: float = Query(..., description="Longitude in decimal degrees, -180 to 180"),
+    radius_km: float = Query(..., gt=0, le=500, description="Search radius in kilometres"),
+) -> Dict[str, Any]:
+    """Find meters near a given location using the Haversine formula.
+
+    Parameters:
+    - latitude: Latitude in decimal degrees (-90 to 90)
+    - longitude: Longitude in decimal degrees (-180 to 180)
+    - radius_km: Search radius in kilometres (maximum 500)
+
+    Returns meters sorted by ascending distance with their distance in km.
+    Results with missing or nil coordinates are silently skipped.
+    """
+    import math
+    if not -90 <= latitude <= 90:
+        raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
+    if not -180 <= longitude <= 180:
+        raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180")
+
+    R = 6371  # Earth radius in kilometres
+    results = []
+
+    for r in dataset:
+        geo = r.get("geo")
+        if geo is None or geo.get("lat") is None or geo.get("lng") is None:
+            continue
+        lat1 = math.radians(latitude)
+        lng1 = math.radians(longitude)
+        lat2 = math.radians(geo["lat"])
+        lng2 = math.radians(geo["lng"])
+        dlat = lat2 - lat1
+        dlng = lng2 - lng1
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        distance = R * c
+        if distance <= radius_km:
+            results.append(
+                {"meterId": r["meterId"], "distance_km": round(distance, 4)}
+            )
+
+    results.sort(key=lambda x: x["distance_km"])
+    return {"meters": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# Hierarchy endpoint
+# ---------------------------------------------------------------------------
+
+def _build_hierarchy(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a tree representing the meter network hierarchy.
+
+    Returns a nested dict with zones → circles → divisions → subdivisions
+    → substations → feeders → distribution transformers, each with meter
+    counts and sample meterIds.  Empty hierarchy codes are preserved with
+    a special marker so callers can distinguish "no code" from "absent level".
+    """
+    # Initialise empty nested structure
+    hierarchy: Dict[str, Any] = {
+        "zones": {},
+        "total_records": len(dataset),
+    }
+
+    for r in dataset:
+        h = r.get("hierarchy", {})
+        zone_name = h.get("zone", {}).get("name", "")
+        zone_code = h.get("zone", {}).get("code", "")
+        circle_name = h.get("circle", {}).get("name", "")
+        circle_code = h.get("circle", {}).get("code", "")
+        division_name = h.get("division", {}).get("name", "")
+        division_code = h.get("division", {}).get("code", "")
+        subdivision_name = h.get("subdivision", {}).get("name", "")
+        subdivision_code = h.get("subdivision", {}).get("code", "")
+        substation_name = h.get("substation", {}).get("name", "")
+        substation_code = h.get("substation", {}).get("code", "")
+        feeder_name = h.get("feeder", {}).get("name", "")
+        feeder_code = h.get("feeder", {}).get("code", "")
+        dt_name = h.get("dt", {}).get("name", "")
+        dt_code = h.get("dt", {}).get("code", "")
+        meter_id = r.get("meterId", "")
+
+        # --- zone ---
+        if zone_name not in hierarchy["zones"]:
+            hierarchy["zones"][zone_name] = {
+                "code": zone_code,
+                "circles": {},
+            }
+        zone = hierarchy["zones"][zone_name]
+
+        # --- circle ---
+        circle_key = circle_name if circle_code else f"_empty_code_{circle_name}"
+        if circle_key not in zone["circles"]:
+            zone["circles"][circle_key] = {
+                "name": circle_name,
+                "code": circle_code,
+                "divisions": {},
+            }
+        circle = zone["circles"][circle_key]
+
+        # --- division ---
+        div_key = division_name if division_code else f"_empty_code_{division_name}"
+        if div_key not in circle["divisions"]:
+            circle["divisions"][div_key] = {
+                "name": division_name,
+                "code": division_code,
+                "subdivisions": {},
+            }
+        division = circle["divisions"][div_key]
+
+        # --- subdivision ---
+        sub_key = subdivision_name if subdivision_code else f"_empty_code_{subdivision_name}"
+        if sub_key not in division["subdivisions"]:
+            division["subdivisions"][sub_key] = {
+                "name": subdivision_name,
+                "code": subdivision_code,
+                "substations": {},
+            }
+        subdivision = division["subdivisions"][sub_key]
+
+        # --- substation ---
+        sub_key2 = substation_name if substation_code else f"_empty_code_{substation_name}"
+        if sub_key2 not in subdivision["substations"]:
+            subdivision["substations"][sub_key2] = {
+                "name": substation_name,
+                "code": substation_code,
+                "feeders": {},
+            }
+        substation = subdivision["substations"][sub_key2]
+
+        # --- feeder ---
+        feed_key = feeder_name if feeder_code else f"_empty_code_{feeder_name}"
+        if feed_key not in substation["feeders"]:
+            substation["feeders"][feed_key] = {
+                "name": feeder_name,
+                "code": feeder_code,
+                "dts": {},
+            }
+        feeder = substation["feeders"][feed_key]
+
+        # --- dt (distribution transformer) ---
+        dt_key = dt_name if dt_code else f"_empty_code_{dt_name}"
+        if dt_key not in feeder["dts"]:
+            feeder["dts"][dt_key] = {
+                "name": dt_name,
+                "code": dt_code,
+                "meterCount": 0,
+                "meterIds": [],
+            }
+        dt_entry = feeder["dts"][dt_key]
+        dt_entry["meterCount"] += 1
+        if len(dt_entry["meterIds"]) < 20:  # keep a few samples
+            dt_entry["meterIds"].append(meter_id)
+
+    return hierarchy
+
+
+# Build hierarchy once at startup
+_hierarchy_cache = _build_hierarchy(dataset)
+
+
+@app.get("/api/hierarchy", response_model=dict)
+async def get_hierarchy(
+    zone_code: Optional[str] = Query(
+        None, description="Filter by zone code (e.g., Z-01, Z-02, Z-03)"
+    ),
+) -> Dict[str, Any]:
+    """Reconstructed meter network hierarchy from the exported dataset.
+
+    Returns a nested tree showing zones → circles → divisions → subdivisions
+    → substations → feeders → distribution transformers (DTs), with meter
+    counts at each level and sample meterIds.
+
+    Query parameters:
+    - zone_code: optional filter to a specific zone code
+
+    Response format:
+    - zones: dict of zone_name → {code, circles: dict}
+    - total_records: total meters in the dataset (403)
+    """
+    # If a zone_code filter is provided, walk the pre-built tree and
+    # return only the matching subtree.
+    if zone_code:
+        zones = _hierarchy_cache.get("zones", {})
+        # Find matching zone
+        matching_zone = None
+        matching_zone_name = None
+        for z_name, z_data in zones.items():
+            if z_data.get("code") == zone_code or z_name.replace(" ", "") == zone_code.replace("Z-", ""):
+                matching_zone = z_data
+                matching_zone_name = z_name
+                break
+        if matching_zone is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Zone with code '{zone_code}' not found",
+            )
+        return {
+            "zones": {matching_zone_name: matching_zone},
+            "total_records": _hierarchy_cache["total_records"],
+        }
+
+    return {
+        "zones": _hierarchy_cache["zones"],
+        "total_records": _hierarchy_cache["total_records"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Combined attribute filtering endpoint
+# ---------------------------------------------------------------------------
+
+def _attrib_filter(items: List[str],
+                   status: Optional[str] = None,
+                   make: Optional[str] = None,
+                   phase_type: Optional[str] = None,
+                   install_type: Optional[str] = None,
+                   dt_code: Optional[str] = None,
+                   zone_code: Optional[str] = None,
+                   circle_code: Optional[str] = None,
+                   feeder_code: Optional[str] = None,
+                   ) -> List[str]:
+    """Apply AND‑combined attribute filters to a list of meterIds.
+
+    Parameters are matched against the in‑memory indexes built at startup.
+    Unknown filter values simply narrow results to 0 matches.
+    """
+    meter_ids: List[str] = list(_by_id.keys())
+
+    if status:
+        meter_ids = _by_status.get(status, [])
+    elif phase_type:
+        meter_ids = _by_phase.get(phase_type, [])
+    elif install_type:
+        # installType is not indexed; fall through to per-record check below
+        pass
+    elif dt_code:
+        meter_ids = _by_dt.get(dt_code, [])
+    elif zone_code:
+        meter_ids = _by_zone.get(zone_code, [])
+    elif circle_code:
+        # circle_code: filter by circle code; some records have empty code
+        meter_ids = [_mid for mid in meter_ids
+                     if _by_id.get(mid, {}).get("hierarchy", {}).get("circle", {}).get("code", "") == circle_code]
+    elif feeder_code:
+        meter_ids = [_mid for mid in meter_ids
+                     if _by_id.get(mid, {}).get("hierarchy", {}).get("feeder", {}).get("code", "") == feeder_code]
+
+    # Remaining filters that aren't covered by the indexed lookups above:
+    # Apply per‑record checks for make, installType, and any remaining dtCode
+    # when it wasn't caught by the indexed path.
+    filtered: List[str] = []
+    for mid in meter_ids:
+        rec = _by_id.get(mid)
+        if rec is None:
+            continue
+        # status filter already handled above; skip re-check
+        if make and rec.get("make", "") != make:
+            continue
+        if phase_type and rec.get("phaseType", "") != phase_type:
+            continue
+        if install_type and rec.get("installType", "") != install_type:
+            continue
+        # dtCode: check both the explicit dtCode field and the hierarchy dt
+        rec_dt = rec.get("dtCode", "")
+        rec_h_dt = rec.get("hierarchy", {}).get("dt", {}).get("code", "")
+        rec_dt_match = (dt_code is not None and
+                        (rec_dt == dt_code or rec_h_dt == dt_code))
+        if dt_code and not rec_dt_match:
+            continue
+        # zone_code from hierarchy
+        if zone_code:
+            rec_zone = rec.get("hierarchy", {}).get("zone", {}).get("code", "")
+            if rec_zone != zone_code:
+                continue
+        # circle_code from hierarchy
+        if circle_code:
+            rec_circle = rec.get("hierarchy", {}).get("circle", {}).get("code", "")
+            if rec_circle != circle_code:
+                continue
+        # feeder_code from hierarchy
+        if feeder_code:
+            rec_feeder = rec.get("hierarchy", {}).get("feeder", {}).get("code", "")
+            if rec_feeder != feeder_code:
+                continue
+        filtered.append(mid)
+
+    return filtered
+
+
+@app.get("/api/meters/query", response_model=dict)
+async def query_meters(
+    status: Optional[str] = Query(
+        None, regex=r"^(Installed|Faulty|Decommissioned)$",
+        description="Filter by installation status"
+    ),
+    make: Optional[str] = Query(None, description="Filter by meter make"),
+    phase_type: Optional[str] = Query(
+        None, regex=r"^(single|three)$",
+        description="Filter by electrical phase type"
+    ),
+    install_type: Optional[str] = Query(
+        None, description="Filter by installation type"
+    ),
+    dt_code: Optional[str] = Query(
+        None, description="Filter by DT code (DT-001 through DT-040)"
+    ),
+    zone_code: Optional[str] = Query(
+        None, description="Filter by zone code (Z-01, Z-02, Z-03)"
+    ),
+    circle_code: Optional[str] = Query(
+        None, description="Filter by circle code (e.g., C-01, or empty)"
+    ),
+    feeder_code: Optional[str] = Query(
+        None, description="Filter by feeder code (e.g., F-001, or empty)"
+    ),
+    page: int = Query(1, ge=1, description="Page number (1‑indexed)"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+) -> Dict[str, Any]:
+    """List meters with combined attribute filtering (AND semantics).
+
+    Supports filtering by any combination of:
+    - ``status`` — installation status
+    - ``make`` — meter manufacturer
+    - ``phase_type`` — single or three
+    - ``install_type`` — CT Operated or Whole Current
+    - ``dt_code`` — distribution transformer code
+    - ``zone_code`` — zone code from hierarchy
+    - ``circle_code`` — circle code from hierarchy
+    - ``feeder_code`` — feeder code from hierarchy
+
+    Filters are applied together using AND semantics.  Unknown or
+    unmatching filter values simply reduce the result set.
+
+    Pagination follows the same scheme as ``/api/meters``:
+    ``page`` and ``per_page`` with ``total_pages`` metadata.
+
+    Empty results return ``{ "meters": [], "total": 0, "page": 1, "total_pages": 0 }``.
+    """
+    filtered = _attrib_filter(
+        list(_by_id.keys()),
+        status=status,
+        make=make,
+        phase_type=phase_type,
+        install_type=install_type,
+        dt_code=dt_code,
+        zone_code=zone_code,
+        circle_code=circle_code,
+        feeder_code=feeder_code,
+    )
+
+    # Pagination
+    total = len(filtered)
+    page = max(page, 1)
+    per_page = max(1, min(per_page, 100))
+    total_pages = (total + per_page - 1) // per_page if total else 0
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = filtered[start:end]
+
+    # Build summary records
+    meters = [_summary_record(_by_id[mid]) for mid in page_items]
+
+    return {
+        "meters": meters,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }
+
+
+@app.get("/api/meters/{meter_id}", response_model=dict)
+async def get_meter(meter_id: str) -> Dict[str, Any]:
+    """Retrieve a single meter's full metadata record.
+
+    Returns a 404 response if the meterId does not exist in the dataset.
+    """
+    record = _by_id.get(meter_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Meter not found")
+    return _full_record(record)
+
+
+# ---------------------------------------------------------------------------
+# Exception handlers
 # ---------------------------------------------------------------------------
 
 @app.exception_handler(HTTPException)

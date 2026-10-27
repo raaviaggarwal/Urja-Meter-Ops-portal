@@ -209,8 +209,11 @@ The portal has a `/(portal)/transformers` route, but detailed field data is not 
 | `/api/meters/search` | GET | Search by meterId or serialNo | Yes (session cookie) |
 | `/api/meters/status/[status]` | GET | Filter by installStatus | Yes (session cookie) |
 | `/api/transformers` | GET | List transformer network data | Yes (session cookie) |
+| `/api/hierarchy` | GET | Reconstruct meter network hierarchy from exported dataset | Yes (session cookie) |
 | `/api/login` | POST | Authenticate; establish session | No (public) |
 | `/api/export/meters` | GET | Export all meters as JSON | Yes (session cookie) |
+| `/api/metadata` | GET | Data source metadata and freshness information | No (public) |
+| `/api/meters/nearby` | GET | Nearby meters using Haversine formula | No (public) |
 
 ### 3.1 `GET /api/meters`
 
@@ -364,6 +367,128 @@ Full meter record as in `meter-export.json`:
 **Note:** Contains 403 of 405 UI meters — discrepancy documented. API should expose the actual count.
 
 **CSV alternative:** Could also offer `GET /api/export/meters/csv` if required, but JSON is the primary format.
+
+### 3.7 `GET /api/hierarchy`
+
+**Summary:** Reconstructed meter network hierarchy from the exported dataset.
+
+**Query parameters:**
+- `zone_code` — optional filter by zone code (Z-01, Z-02, Z-03)
+
+**Success response (200):**
+```json
+{
+  "zones": {
+    "Jaipur Zone 1": {
+      "code": "Z-01",
+      "circles": {
+        "Circle 1": {
+          "name": "Circle 1",
+          "code": "C-01",
+          "divisions": {
+            "Division 1": {
+              "name": "Division 1",
+              "code": "D-01",
+              "subdivisions": {
+                "Subdivision 1": {
+                  "name": "Subdivision 1",
+                  "code": "SD-01",
+                  "substations": {
+                    "Substation 1": {
+                      "name": "Substation 1",
+                      "code": "SS-01",
+                      "feeders": {
+                        "Feeder 1": {
+                          "name": "Feeder 1",
+                          "code": "F-001",
+                          "dts": {
+                            "DT-001": {
+                              "name": "Malviya Nagar DT 1",
+                              "code": "DT-001",
+                              "meterCount": 10,
+                              "meterIds": ["J100000", "J100011", ...]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "total_records": 403
+}
+```
+
+**Empty results:** When no meters match the filter, return `{ "zones": {}, "total_records": 403 }`.
+
+**Data-quality notes:**
+- All 403 records have a complete 7-level hierarchy (zone → circle → division → subdivision → substation → feeder → dt)
+- 6 records have empty circle codes (preserved with `_empty_code` marker)
+- 3 records have empty substation codes
+- 5 records have empty feeder codes
+- DT-007 is shared by 13 meters; all other DTs are shared by exactly 10 meters
+- The hierarchy is built from the dataset at startup; the original `meter-export.json` is never modified
+
+## 3.8 `GET /api/metadata`
+
+**Summary:** Data source metadata and freshness information.
+
+**Success response (200):**
+```json
+{
+  "record_count": 403,
+  "source_file": "meter-export.json",
+  "file_modification_time": "2026-10-27T18:33:28.123456",
+  "freshness": {
+    "policy": "static_export",
+    "description": "Data comes from a static export file; no live portal connection.",
+    "last_updated": null
+  },
+  "dataset": {
+    "phase_types": ["single", "three"],
+    "statuses": ["Installed", "Faulty", "Decommissioned"],
+    "makes": ["HPL", "L&T", "Genus", "Secure", "Allied"]
+  }
+}
+```
+
+**Freshness policy:** The data comes from a static export file (`meter-export.json`). The `file_modification_time` reflects the local file system metadata, not a portal data update time. There is no claim of live freshness or real-time updates.
+
+**Empty results:** N/A — this is a metadata endpoint, not a data filter.
+
+## 3.9 `GET /api/meters/nearby`
+
+**Summary:** Find meters near a given location using the Haversine formula.
+
+**Query parameters:**
+- `latitude` — Latitude in decimal degrees (-90 to 90, required)
+- `longitude` — Longitude in decimal degrees (-180 to 180, required)
+- `radius_km` — Search radius in kilometres (maximum 500, default: required)
+
+**Success response (200):**
+```json
+{
+  "meters": [
+    {
+      "meterId": "J100000",
+      "distance_km": 2.345
+    }
+  ],
+  "total": 12
+}
+```
+
+**Empty results:** `{ "meters": [], "total": 0 }` when no meters are within the specified radius.
+
+**Distance calculation:** Uses the Haversine formula with Earth radius R = 6371 km. Meters with missing or nil coordinates are silently skipped.
+
+**Performance:** On a 403-record dataset, geospatial search completes in under 100ms. No spatial index required at this scale.
 
 ## 4. Unavailable Data — Consumption and Transformer Details
 

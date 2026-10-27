@@ -1,384 +1,196 @@
-# Urja Meter Ops — Phase 2 Protocol
+# Urja Meter Ops — Portal and Export Evidence
 
-## 1. Authentication Flow
+This document distinguishes facts measured from the local export and the
+authenticated portal UI from claims reported by earlier investigation notes.
+It does not describe an API integration. No credentials, cookies, or tokens
+are recorded here.
 
-### Verified Authentication Protocol
+## Evidence classifications
 
-- **Endpoint:** `POST https://urja-ops.flockenergy.tech/login`
-- **Method:** HTTP POST
-- **Content-Type:** `application/x-www-form-urlencoded`
-- **Required headers:**
-  - `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
-  - `Origin: https://urja-ops.flockenergy.tech`
-  - `Referer: https://urja-ops.flockenergy.tech/login`
-- **Body format:** `email=<email>&password=<password>`
-- **Success response:** HTTP 200, session established (session cookie set by server), redirect to dashboard
-- **Failure response:** HTTP 200, JSON `{"type":"failure","status":401,"data":"[...,\"Invalid email or password.\"]}`
-- **No CSRF token** required in form body
-- **Session mechanism:** Server sets session cookie after successful login (mechanism not directly observed; SvelteKit default)
-- **Cross-origin POST:** Blocked without `Origin` and `Referer` headers (403 Forbidden observed without these headers)
+- **Verified by direct observation** — seen in the integrated browser during
+  this audit. UI observations do not establish the underlying HTTP response
+  format or request implementation.
+- **Verified by captured request/response or existing test** — supported by a
+  retained request/response or a reproducible local test.
+- **Inferred but not confirmed** — plausible from the notes or UI, but not
+  established by direct evidence available for this audit.
+- **Unknown** — not established by available evidence. Earlier notes sometimes
+  attribute this gap to lack of portal access; the portal listing was
+  accessible again during this audit.
 
-### Observed Behavior After Authentication
+## 1. Live portal observations
 
-- Protected routes accessible: `/(portal)/meters`, `/(portal)/meters/[id]`, `/(portal)/transformers`
-- Meter listing: 405 meters displayed in UI (see discrepancy with export below)
-- Meter search: Available by meter number or serial number
-- Status filter: Visible statuses — Installed, Faulty, Decommissioned
-- Pagination: 20 rows per page, 21 pages (as displayed in UI)
-- Export: "Export all meters" button accessible from dashboard (export file available as `meter-export.json`)
+### Availability observations
 
-### Not Yet Verified
+- **2026-10-27 18:34:42.633 UTC:** The integrated browser was at
+  `https://urja-ops.flockenergy.tech/meters`. Its page snapshot showed HTTP
+  502/error content, and the browser console recorded a failed resource with
+  status 502. This is evidence of a 502 for that page observation, not that
+  the entire portal was down.
+- **2026-10-28:** The base URL was subsequently opened in the same shared
+  browser session. It navigated to `/meters`, where the signed-in Meters page
+  rendered. The exact time of this later observation was not captured.
 
-- Cookie name and exact session mechanism (not observed in detail)
-- Login redirect target after successful authentication
-- Session expiration/revocation behavior
-- Whether additional headers are required for subsequent authenticated requests
+### Meter listing visible in the browser
 
-## 2. Verified Request Paths and Parameters
+**Verified by direct observation on 2026-10-28:**
 
-### Public (Unauthenticated) Routes — Return 404 Without Authentication
+- The page was titled **Meters** and displayed **403 total**.
+- The table showed 20 records on **Page 1 of 21**. Visible columns were
+  `METER`, `SERIAL`, `MAKE`, `PHASE`, `STATUS`, and `DT`.
+- Five displayed records were compared with `meter-export.json`. For each of
+  `J100000` through `J100004`, `meterId`, `serialNo`, `make`, `phaseType`,
+  `installStatus`, and `dtCode` matched the local export exactly.
+- This comparison verifies those displayed fields for those five records
+  only. It does not validate other fields or prove that the local export and
+  portal remain globally identical.
 
-| Path | Method | Notes |
+The current observed UI total is **403**, matching the local export. Earlier
+notes reporting 405 portal meters are stale or inconsistent with this later
+observation; the cause of the earlier count is not established.
+
+The page visibly exposes navigation to Meters, Transformers, Ops Desk, and
+Sign out. The Transformers page contents were not examined in this audit.
+
+## 2. Authentication and session behavior
+
+**Verified by direct observation:** A sign-in page at `/login` displayed Email
+and Password fields in an earlier browser observation. The later meter listing
+was displayed in a browser session with a Sign out control.
+
+**Reported by earlier investigation notes, not independently verified in this
+audit:** Those notes describe a form-based login, a failed-login JSON
+response, and requests involving browser headers. The notes conflict on
+whether successful login was actually achieved and whether a session cookie
+was observed. No login submission was made for this audit, and no login
+request/response capture was available to resolve those conflicts.
+
+**Unknown:** The successful login request and response, exact authentication
+mechanism, redirect behavior, whether any additional request headers are
+required, and session expiry or revocation behavior. Do not treat the
+framework-based cookie explanation in earlier notes as confirmed.
+
+## 3. Portal routes, data requests, and response formats
+
+**Verified by direct observation:** The browser displayed the Meters page at
+`/meters`; its navigation included a Transformers link. The sign-in page was
+observed at `/login`.
+
+**Reported by earlier investigation notes, not independently verified here:**
+the notes refer to meter-detail and transformer pages and describe their
+rendered content. They also report a page-based listing and search/filter UI.
+The exact authenticated data-fetching requests, paths, methods, parameters,
+request bodies, response schemas, and content types were not captured in
+evidence available for this audit. The literal route strings
+`/(portal)/meters` and `/(portal)/transformers` in old notes may be
+framework-internal route labels; do not assume they are request URLs.
+
+The browser showed rendered table content. This alone does not establish
+whether the server response was HTML, JSON, or a combination of page data and
+client requests. No API endpoint or request payload is specified here.
+
+## 4. Local export: verified findings
+
+The following measurements are from the repository's `meter-export.json`, not
+from an assumed live API:
+
+- **403 raw records**
+- **403 unique, non-null meter IDs**
+- **No missing or blank IDs**
+- **No duplicate IDs**
+- IDs span **J100000–J100402**, with no gaps in that range
+- **No missing or invalid coordinates:** every record has numeric latitude
+  and longitude within valid geographic ranges
+- Status counts: Installed **238**, Faulty **90**, Decommissioned **75**
+- Make counts: Allied **76**, Genus **88**, HPL **90**, L&T **64**, Secure
+  **85**
+- DT codes: DT-001 through DT-040; each has 10 records except DT-007, which
+  has 13
+- The explicit `dtCode` agrees with `hierarchy.dt.code` in every record
+
+Each export record has these top-level fields: `meterId`, `serialNo`, `make`,
+`phaseType`, `installStatus`, `installType`, `build`, `dtCode`, `hierarchy`,
+and `geo`. The export hierarchy has `zone`, `circle`, `division`,
+`subdivision`, `substation`, `feeder`, and `dt` objects. These findings
+describe the local file; they do not establish that the portal exposes the
+same full record schema.
+
+No separate evidence available in this audit establishes the export button's
+request path or whether the local file was produced by the portal's current
+export behavior.
+
+## 5. Pagination, filtering, and rate limits
+
+- **Verified by direct observation:** The visible listing reported 403 total
+  and Page 1 of 21, showing 20 rows on that page.
+- **Reported by earlier notes:** Search by meter number or serial number and
+  status options were visible in a prior portal investigation. The exact
+  parameters, request behavior, and result counts were not captured here.
+- **Unknown:** Whether pagination and filtering are performed server-side or
+  client-side, the behavior of later pages, exact search/filter controls and
+  request parameters, and any rate limits. No rate-limit behavior was tested
+  or documented.
+
+## 6. Evidence status by claim
+
+| Claim | Classification | Evidence and limitation |
 |---|---|---|
-| `/(portal)/meters` | GET | Meter listing; returns 404 without auth |
-| `/(portal)/meters/[id]` | GET | Meter details; returns 404 without auth |
-| `/(portal)/transformers` | GET | Transformers page; returns 404 without auth |
-
-### Authenticated Route Observations (from browser DevTools Network tab)
-
-| Path | Method | Parameters | Response Format |
-|---|---|---|---|
-| `/login` | POST | Body: `email=<email>&password=<password>`; headers: `User-Agent`+`Origin`+`Referer` | JSON: `{"type":"failure","status":401,...}` on failure; HTML/dashboard on success |
-| `/(portal)/meters` | GET | `User-Agent`+`Origin`+`Referer` headers | HTML rendering of meter dashboard |
-| `/(portal)/meters` | GET | `page` query parameter for pagination | HTML; 20 rows per page |
-| `/(portal)/meters` | GET | Search by meter number or serial number | HTML filtered results |
-| `/(portal)/meters/[id]` | GET | Individual meter details | HTML with meter attributes and consumption data |
-| `/(portal)/transformers` | GET | — | HTML with network topology |
-
-### Query Parameters Observed
-
-- `page`: Pagination parameter; navigates between 21 pages (20 rows per page, 405 total as displayed)
-- Search by meter number or serial number: Query parameter(s) for meter search functionality (exact parameter names not directly observed; search functional after authentication)
-- Status filter: Observable in the UI (Installed, Faulty, Decommissioned), exact query parameter name not confirmed
-
-### Identifier Passing
-
-- Meter IDs passed as URL path segments: `/(portal)/meters/[id]`
-- No query-parameter-based ID passing observed for meter details
-
-## 3. Response Formats
-
-### Without Authentication
-
-- All protected routes return HTTP 404 Not Found
-- Login page serves HTML (Svelte-rendered)
-- Login POST returns JSON on failure
-
-### With Authentication
-
-- **Login POST:** Returns JSON `{"type":"failure","status":401,...}` on failure; HTTP 200 with session establishment on success
-- **Meter listing:** HTML rendering (Svelte components hydrated on client); contains meter table with 20 rows per page
-- **Meter details:** HTML rendering; includes meter attributes and consumption data
-- **Transformers page:** HTML rendering; network topology information
-- **All observed responses:** HTML (Svelte-rendered), not pure JSON API responses
-- **The login POST is the only observed JSON endpoint**
-
-### Inferred Response Formats
-
-- With authentication, responses likely remain HTML (Svelte components hydrated on the client), possibly with embedded JSON data for consumption charts, etc.
-- The portal is a SvelteKit single-page application; pages are server-rendered or client-hydrated
-
-## 4. Meter Data Structures
-
-### Export Data (`meter-export.json`)
-
-The `meter-export.json` file contains 403 meter records (see discrepancy with portal UI below). Each record has the following top-level fields and data types:
-
-| Field | Data Type | Description |
-|---|---|---|
-| `meterId` | string | Unique meter identifier (e.g., "J100000") |
-| `serialNo` | string | Meter serial number (e.g., "SE33962") |
-| `make` | string | Meter manufacturer (e.g., "HPL", "L&T", "Genus", "Secure", "Allied") |
-| `phaseType` | string | Electrical phase configuration ("single" or "three") |
-| `installStatus` | string | Installation status ("Installed", "Faulty", "Decommissioned") |
-| `installType` | string | Installation type ("Whole Current", "CT Operated", "v2") |
-| `build` | string | Build version ("legacy" or "v2") |
-| `dtCode` | string | DT (distribution transformer) code (e.g., "DT-001") |
-| `hierarchy` | object | Network hierarchy structure (see below) |
-| `geo` | object | Geographical coordinates { `lat`: number, `lng`: number } |
-
-### Hierarchy Structure (nested object)
-
-Each meter's `hierarchy` object contains seven levels, each with `name` (string) and `code` (string):
-
-- `zone`: e.g., "Jaipur Zone 1", "Z-01"
-- `circle`: e.g., "Circle 1", "C-01"
-- `division`: e.g., "Division 1", "D-01"
-- `subdivision`: e.g., "Subdivision 1", "SD-01"
-- `substation`: e.g., "Substation 1", "SS-01"
-- `feeder`: e.g., "Feeder 1", "F-001"
-- `dt`: e.g., "Malviya Nagar DT 1", "DT-001"
-
-### Geolocation Structure
-
-- `geo.lat`: number (decimal degrees)
-- `geo.lng`: number (decimal degrees)
-
-### Export Statistics
-
-- **Total records in export:** 403 meters
-- **Status distribution:** Installed, Faulty, Decommissioned (all three present)
-- **Phase type distribution:** single, three (both present)
-- **Build version distribution:** legacy, v2 (both present)
-- **Unique dtCodes:** 40 unique codes (DT-001 through DT-040)
-- **Unique feeder codes:** 27 feeder codes (F-001 through F-027)
-- **Unique substation codes:** 15 substation codes (SS-01 through SS-15)
-- **Unique zone codes:** 10 zone codes (Z-01 through Z-10)
-- **Unique circle codes:** 10 circle codes (C-01 through C-10)
-- **Unique subdivision codes:** 12 subdivision codes (SD-01 through SD-12)
-
-### Discrepancy Note
-
-- **Portal UI displays:** 405 total meters (20 rows per page, 21 pages)
-- **Export file contains:** 403 meter records
-- **Discrepancy:** 2 meters present in the portal UI but not in the export file
-- **Status of investigation:** Discrepancy noted; root cause not yet determined (could be export filter, pagination edge case, or UI counting difference)
-
-### Meter Listing UI (Authenticated Observation)
-
-Visible columns in the meter listing table:
-
-| Column | Example Data |
-|---|---|
-| Meter number | J100000 |
-| Serial number | SE33962 |
-| Make | HPL |
-| Phase | single / three |
-| Status | Installed / Faulty / Decommissioned |
-| DT | DT-001 |
-
-### Previously Verified from Portal
-
-- 405 total meters displayed in UI
-- 20 rows per page, 21 pages
-- Search by meter number or serial number
-- Status filter: Installed, Faulty, Decommissioned
-
-## 5. Consumption Data
-
-### Observed from Meter Details Page (Authenticated)
-
-- Consumption history is displayed on the meter details page `/(portal)/meters/[id]`
-- Data appears to be time-series (interval readings)
-- Exact time granularity (hourly/daily/monthly) could not be verified
-- Consumption records relate to a specific meter identifier passed as `[id]` in the URL
-- Format (JSON/HTML) and exact fields could not be determined from authenticated browser observation alone
-
-### From Export Data
-
-The `meter-export.json` export contains meter attributes but does **not** include consumption readings or time-series data. It contains static meter metadata (identity, location, hierarchy, status, etc.).
-
-### Not Yet Verified
-
-- Exact consumption data format (JSON structure or embedded HTML)
-- Time granularity and interval duration
-- Measurement units (kWh, etc.)
-- Available date-range filters for consumption data
-- Whether consumption data is accessible via a separate API endpoint or embedded within the meter details page HTML
-
-## 6. Transformer Data
-
-### Observed from Transformer Page (Authenticated)
-
-- The `/(portal)/transformers` page is accessible after login
-- Displays transformer network topology
-- Transformer fields and feeder associations observed but not fully documented in this protocol
-- Relationship between meters and transformers: each meter is associated with a DT (distribution transformer) within the hierarchy (e.g., "Substation 1" / "Feeder 1" / "Malviya Nagar DT 1")
-
-### Not Yet Verified
-
-- Exact transformer field names and data types
-- Feeder capacity and electrical ratings
-- Additional network hierarchy details (sub-transmission, etc.)
-- Whether a separate transformer detail page exists (`/(portal)/transformers/[id]`)
-
-## 7. JSON Export Behavior
-
-### Export File: `meter-export.json`
-
-- **Location:** Root of the Urja-Meter-Ops-portal repository
-- **Contents:** Array of 403 meter records (metadata only; no consumption time-series)
-- **Download method:** Through portal's "Export all meters" button (observed in authenticated dashboard)
-- **Top-level structure:** JSON array
-- **Record count:** 403 meters (see discrepancy note above)
-- **Field names:** As documented in Section 4 above
-- **Data types:** As documented in Section 4 above
-- **Subset or all meters:** Contains 403 of 405 meters displayed in the portal UI — a 2-meter discrepancy
-
-### Corresponding Browser Request
-
-- The export request was observed via Browser DevTools Network tab during authenticated navigation
-- The request is triggered by clicking the "Export all meters" button on the dashboard
-- Response is the `meter-export.json` file content
-- Exact request path and parameters not fully documented in this protocol (export button UI interaction observed but request details captured primarily as file output)
-
-### Export Limitations
-
-- Export contains meter metadata only — no consumption time-series data
-- 2-meter discrepancy with portal UI (405 displayed vs. 403 exported)
-- Exact export request URL and parameters not fully documented
-
-## 8. Error Handling and Session Expiration
-
-### Observed Error Behavior
-
-- **Login failure:** HTTP 200 with JSON `{"type":"failure","status":401,"data":"[...,\"Invalid email or password.\"]}` — error message displayed on login page, no redirect
-- **Protected route without auth:** HTTP 404 Not Found (for GET `/(portal)/meters`, etc.)
-- **Cross-origin POST without proper headers:** HTTP 403 Forbidden
-
-### Session Expiration
-
-- Not directly observed
-- Inferred: Session cookie set after login; protected routes require valid session
-- If session expires: Likely redirect to login page or 401/403 on subsequent requests (not verified)
-
-## 9. Confirmed Facts vs Assumptions vs Unresolved Questions
-
-### Confirmed Facts (with evidence)
-
-| Fact | Evidence |
-|---|---|
-| Authentication protocol: `POST /login` with `email`+`password`, requiring `User-Agent`+`Origin`+`Referer` headers | Python `urllib` verification; 40+ credential patterns tested |
-| Login returns JSON failure: `{"type":"failure","status":401,"data":"[...,\"Invalid email or password.\"]}` | Python urllib response body |
-| Portal is SvelteKit SPА | JavaScript bundle analysis (`app.03ZTmlg3.js`, `start.Dtb6sIWb.js`) |
-| Route mapping: `/login`, `/(portal)/meters`, `/(portal)/meters/[id]`, `/(portal)/transformers` | Matcher dictionary in app entry chunk |
-| Meter listing after auth: 405 meters, 20 rows/page, 21 pages | Authenticated browser session observation |
-| Visible listing columns: meter number, serial number, make, phase, status, DT | Authenticated browser session observation |
-| Visible statuses: Installed, Faulty, Decommissioned | Authenticated browser session observation |
-| Meter search by meter number or serial number | Authenticated browser session observation |
-| Export file `meter-export.json`: 403 records, specific field structure | File analysis via Python json.load() |
-| Export field names: meterId, serialNo, make, phaseType, installStatus, installType, build, dtCode, hierarchy, geo | File analysis |
-| Hierarchy levels: zone/circle/division/subdivision/substation/feeder/dt — each with name and code | File analysis |
-| Geo coordinates: lat, lng | File analysis |
-| No CSRF token required in login form | Verified via Python urllib (form submission works without CSRF token) |
-| Cross-origin POST blocked without `Origin`/`Referer` headers | Python urllib got 403 without these headers |
-
-### Inferred Assumptions (reasonable, not directly verified)
-
-| Assumption | Reasoning |
-|---|---|
-| Consumption data is time-series per meter | Common pattern for meter operations portals; consumption displayed on meter details page |
-| Meters organized hierarchically (transformers/feeders/substation) | Route structure `/(portal)/transformers` suggests network hierarchy; hierarchy present in export data |
-| Authentication uses session cookies | Standard for SvelteKit; session cookie set after login (inferred) |
-| With proper headers, login POST works | Verified via Python urllib with `Origin`+`Referer` headers |
-| Meter listing has pagination and status filters | Now confirmed via authenticated observation |
-| Export contains meter metadata only (no consumption data) | Export file structure confirms — only static meter attributes |
-| Discrepancy of 2 meters (405 UI vs. 403 export) | Noted; could be export filter, UI counting difference, or edge case |
-
-### Unresolved Questions (evidence gaps)
-
-| Question | Blockers / What Would Verify |
-|---|---|
-| Exact consumption data format, time granularity, units | Meter details page not fully inspected; consumption data structure not observed |
-| Authentication cookie name and session mechanism | Not observed in detail; SvelteKit default inferred |
-| Whether authenticated GET requests require additional headers beyond `User-Agent` | Not directly verified for protected routes |
-| Exact export request URL and parameters | Request observed but not fully captured; button UI interaction seen |
-| Network hierarchy details beyond what's in export (substation/feeder IDs, capacity) | Export has codes; live portal may have additional attributes |
-| Dashboard page content and full navigation workflow | Initial observations only; complete flow not documented |
-| Whether export includes all meters or a subset (discrepancy: 405 UI vs. 403 export) | Discrepancy noted; root cause not yet determined |
-| Transformer field names, feeder capacities, network topology details | Transformer page accessible but not fully inspected |
-| Browser DevTools Network request details for authenticated actions | Captured in overview but specific request/response details not fully documented |
-| Successful login redirect target and dashboard content | Observed that login succeeds (HTTP 200, session established) but exact redirect not documented |
-
-## 10. Implications for API Design
-
-### API Service Requirements
-
-Based on the verified protocol, any API service built over this portal should:
-
-1. **Implement the same authentication flow:**
-   - `POST /login` with `email`+`password`, requiring `User-Agent`+`Origin`+`Referer` headers
-   - Session management via cookies (SvelteKit default pattern)
-   - No CSRF token required in form body
-
-2. **Support the same data model:**
-   - Meter records with: `meterId`, `serialNo`, `make`, `phaseType`, `installStatus`, `installType`, `build`, `dtCode`, `hierarchy`, `geo`
-   - Hierarchy levels: zone/circle/division/subdivision/substation/feeder/dt — each with `name` and `code`
-   - Geolocation: `lat`, `lng`
-
-3. **Handle the observed portal behaviors:**
-   - Meter listing with pagination (20 rows per page)
-   - Search by meter number or serial number
-   - Status filter (Installed, Faulty, Decommissioned)
-   - 405 UI meters vs. 403 exported meters discrepancy — API should clarify which count is correct
-
-4. **Note on data formats:**
-   - Portal renders HTML (Svelte-rendered); API could provide JSON responses
-   - Consumption time-series data not in the export — would need separate endpoint
-   - Transformer/network data accessible but not fully documented
-
-5. **Error handling:**
-   - Login failure: JSON response with `type":"failure","status":401`
-   - Unauthenticated access: Portal returns 404; API should return appropriate 401/403
-   - Session expiration: Likely redirect to login or 401/403 (not verified)
-
-### Recommended API Endpoints (based on portal protocol)
-
-While the portal itself does not expose a pure JSON API, a clean API service over this portal should implement:
-
-- `GET /api/meters` — list with pagination, search, status filter
-- `GET /api/meters/[id]` — individual meter details with consumption
-- `GET /api/transformers` — transformer network data
-- `POST /api/login` — authentication (same as portal `POST /login`)
-- `GET /api/export/meters` — export all meters (CSV/JSON format)
-- Error endpoints for 401/403/404 responses
-
-### Phase 2 Status: PARTIALLY COMPLETED
-
-All feasible protocol-investigation tasks have been performed based on available evidence. The authentication protocol is fully verified. The meter data structure (from export) is fully documented. Consumption data format, transformer details, and the 403/405 meter discrepancy are noted as unresolved gaps. `docs/PROTOCOL.md` has been created.
-
-### Remaining Gaps (for Phase 3)
-
-- Consumption data format and time-series retrieval
-- Transformer detailed fields and feeder associations
-- Resolution of 405 UI meters vs. 403 exported meters discrepancy
-- Browser DevTools Network request details for authenticated GET requests
-- Successful login redirect target and dashboard content
-- Authentication cookie name and session mechanism details
-- Whether additional API endpoints exist beyond what the portal exposes
-
-### Next Actions
-
-1. Resolve the 403/405 meter discrepancy (determine if export is a subset, if UI counts differ, etc.)
-2. Inspect meter details page consumption data format
-3. Inspect transformer page fields and feeder associations
-4. Capture full Browser DevTools Network request/response details for authenticated actions
-5. Document authentication session behavior (cookie name, expiration)
-6. Determine exact export request URL and parameters
-
----
-
-## Appendix: Verified Data — Sample Meter Record From Export
-
-```json
-{
-  "meterId": "J100000",
-  "serialNo": "SE33962",
-  "make": "HPL",
-  "phaseType": "single",
-  "installStatus": "Decommissioned",
-  "installType": "Whole Current",
-  "build": "legacy",
-  "dtCode": "DT-001",
-  "hierarchy": {
-    "zone": { "name": "Jaipur Zone 1", "code": "Z-01" },
-    "circle": { "name": "Circle 1", "code": "C-01" },
-    "division": { "name": "Division 1", "code": "D-01" },
-    "subdivision": { "name": "Subdivision 1", "code": "SD-01" },
-    "substation": { "name": "Substation 1", "code": "SS-01" },
-    "feeder": { "name": "Feeder 1", "code": "F-001" },
-    "dt": { "name": "Malviya Nagar DT 1", "code": "DT-001" }
-  },
-  "geo": { "lat": 26.938961002479868, "lng": 75.83095696146852 }
-}
-```
+| Local export has 403 records and 403 unique IDs | Verified by direct observation | `meter-export.json`; counts and uniqueness were recalculated |
+| IDs are contiguous from J100000 to J100402 | Verified by direct observation | Full numeric interval checked; no gaps |
+| Export coordinates are present and valid | Verified by direct observation | All 403 records checked for numeric latitude/longitude ranges |
+| Current portal listing shows 403 records and 20 rows on page 1 of 21 | Verified by direct observation | Authenticated browser UI on 2026-10-28 |
+| Five portal rows match export values for six visible fields | Verified by direct observation and local comparison | J100000–J100004; no claim about unobserved fields |
+| `/meters` showed 502 | Verified by direct observation | Browser event timestamp 2026-10-27 18:34:42.633 UTC |
+| Base URL later led to a rendered meter listing | Verified by direct observation | Same shared browser session; 2026-10-28 |
+| Login is form-based and its failure response has a particular JSON shape | Inferred but not confirmed in this audit | Described in earlier notes; no request/response capture available here |
+| A successful login sets a session cookie | Inferred but not confirmed | Earlier notes conflict; no login response or cookie was inspected |
+| Session expiration behavior | Unknown | Not observed or tested |
+| Exact authenticated data-fetching endpoints and response schemas | Unknown | No request/response evidence available |
+| Portal detail and transformer data fields | Unknown | Not inspected in this audit |
+| 405 portal records | Not supported by the current observation | Earlier notes report 405; current listing reports 403 |
+
+## 7. Earlier investigation notes and limitations
+
+`docs/PHASE1_INVESTIGATION.md`, `docs/API_DESIGN.md`, `README.md`,
+`Final_Report.md`, `BLOCKER_REPORT.md`, `AUDIT_OUTPUT.md`, and
+`audit_output.txt` contain historical claims. They are not independent
+evidence by themselves. In particular:
+
+- Some notes label authentication details as verified while also saying that
+  valid credentials or successful authenticated access were unavailable.
+- The notes disagree on the portal count (405 versus 403) and on the evidence
+  for successful authentication.
+- Proposed API endpoints in API design documents describe a proposed service,
+  not confirmed portal endpoints.
+- Local application test results verify the local API against the export; they
+  do not prove live portal protocol behavior.
+
+Claims should be promoted to verified status only when supported by a
+reproducible capture or a directly observed portal result with its scope
+recorded.
+
+## 8. Checks still required
+
+The meter listing was accessible in the shared authorized browser session on
+2026-10-28. The following protocol details remain unverified:
+
+1. Capture the login flow's actual request and response without recording
+   credentials or session material; verify redirect and successful
+   authentication behavior.
+2. Observe the actual data-fetching requests for listing, meter details,
+   transformer data, and export. Record paths, methods, parameters, status
+   codes, content types, and sanitized response shapes; do not guess endpoints.
+3. Exercise pagination and search/status filters and compare returned results
+   with what the UI displays.
+4. Observe session expiry or revocation safely and record the actual resulting
+   UI/request behavior.
+5. The requested independent comparison of five meters is complete for the
+   six fields visible in the listing. Compare additional record fields and
+   investigate any future discrepancies between portal and export.
+6. Inspect transformer and meter-detail fields and their hierarchy
+   relationships directly.
+7. Check rate-limit behavior only through normal, authorized use and record
+   any observed server response; do not infer a limit from a single request.
+
+No API or application behavior is specified or implemented by this protocol
+audit.
