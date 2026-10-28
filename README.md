@@ -71,8 +71,9 @@ or precise coordinates.
 
 Malformed records and duplicate meter IDs make the entire input batch fail
 with a nonzero exit code; no records are silently discarded and no output is
-written. The first occurrence of an ID is used only as a reference when
-reporting later duplicates. A valid batch is serialized to a temporary file
+written. The `duplicate_ids` summary counts occurrences after the first;
+that first occurrence is used only as a reference when reporting later
+duplicates. A valid batch is serialized to a temporary file
 in the destination directory and atomically replaces the requested
 destination. If validation or writing fails, an existing destination remains
 unchanged. The input and output paths must be different.

@@ -101,6 +101,19 @@ def test_missing_required_identifier_is_invalid() -> None:
     assert any("missing required field 'meterId'" in error for error in report.errors)
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["serialNo", "make", "phaseType", "installStatus", "installType", "build", "dtCode"],
+)
+def test_required_text_fields_must_be_strings(field: str) -> None:
+    record = _synthetic_record()
+    record[field] = 123
+
+    report = validate_records([record])
+    assert not report.is_valid
+    assert any(f"'{field}' must be a string" in error for error in report.errors)
+
+
 def test_duplicate_ids_are_reported_without_revealing_the_identifier() -> None:
     record = _synthetic_record()
     report = validate_records([record, record.copy()])
@@ -212,6 +225,7 @@ def test_cli_requires_explicit_output_and_reports_counts_without_record_values(
     assert "total=1 valid=0 invalid=1 duplicate_ids=0" in output.out
     assert "'geo.lat'" in output.err
     assert record["meterId"] not in output.out + output.err
+    assert str(record["geo"]["lng"]) not in output.out + output.err
     assert not destination.exists()
 
 
