@@ -1,5 +1,12 @@
 # Urja Meter Ops — Phase 3 API Design
 
+> **Historical design proposal:** This document contains proposed API behavior
+> and unverified assumptions. It is not evidence that these portal endpoints,
+> authentication steps, headers, responses, or session behavior were observed
+> or implemented. The current evidence-qualified portal observations are in
+> [docs/PROTOCOL.md](PROTOCOL.md); the local API implementation is described
+> in [README.md](../README.md).
+
 ## 1. Requirements Summary
 
 ### 1.1 Functional Requirements
@@ -14,9 +21,9 @@
 | FR-5a | **Geolocation filtering** by lat/lng | Export data has `geo.lat` and `geo.lng` per meter |
 | FR-6 | **Transformer/network data** related to meters | Portal route `/(portal)/transformers` accessible after login; each meter associated with a DT in hierarchy |
 | FR-7 | **JSON export** of all meter metadata | Export file `meter-export.json` at repository root; 403 records (see discrepancy with 405 UI count) |
-| FR-8 | **Authentication** for protected routes | Verified: `POST /login` with `email`+`password`; headers `User-Agent`+`Origin`+`Referer`; session cookie established |
-| FR-8a | **Session management** for subsequent requests | Inferred: session cookie after login; protected routes require valid session |
-| FR-9 | **Error handling** for invalid parameters, missing records, auth failures | Portal returns 404 for protected routes without auth; login returns JSON `{"type":"failure","status":401,...}` |
+| FR-8 | **Authentication** for protected routes | Proposed requirement only; login submission, required headers, and authentication mechanism are unverified |
+| FR-8a | **Session management** for subsequent requests | Proposed requirement only; session behavior and protected-route requirements are unknown |
+| FR-9 | **Error handling** for invalid parameters, missing records, auth failures | Local API validation and missing-resource responses are tested; portal authentication failures and their response formats remain unverified |
 
 ### 1.2 Non-Functional Requirements
 
@@ -24,8 +31,8 @@
 |---|---|---|
 | NFR-1 | **Efficient listing** — avoid full-dataset scans | 403/405 meter dataset is small enough for in-memory indexing; avoid repeated file reads in production |
 | NFR-2 | **Consistent response formats** | Portal is SvelteKit SPА rendering HTML; API should provide JSON for programmatic consumption |
-| NFR-3 | **Stateless where possible** | Authentication via login POST; session cookie for subsequent requests |
-| NFR-4 | **Clear error responses** | Portal returns 404 (unauth), 403 (bad headers), 401 (bad credentials); API should follow conventions |
+| NFR-3 | **Stateless where possible** | Design consideration only; no portal authentication or session approach is confirmed |
+| NFR-4 | **Clear error responses** | Proposed API design goal; portal authentication error codes and formats are unverified |
 | NFR-5 | **Read-only portal** | Portal treated as read-only; API mirrors data without modifying source |
 
 ### 1.3 Data Structure (from `meter-export.json`)
@@ -81,9 +88,9 @@ Each meter record has these top-level fields and types:
 - **Feeder capacity/ratings:** Not in available data
 - **Transformer detailed fields:** Portal route `/(portal)/transformers` accessible but not fully inspected
 - **Consumption format/granularity/units:** Not documented
-- **Login credentials:** Assignment PDF not readable; no credentials in local environment
+- **Login credentials:** Not included in this design document; login and authentication behavior remain unknown
 - **Exact export request URL/parameters:** Observed via browser but not fully captured
-- **Session cookie name/mechanism:** Inferred as SvelteKit default; not directly observed
+- **Session cookie name/mechanism:** Unknown; no successful login response or session behavior was captured
 - **Successful login redirect target:** Not documented
 
 ## 2. Architecture Design
@@ -92,8 +99,8 @@ Each meter record has these top-level fields and types:
 
 - **Read-only API** over the existing legacy portal — portal treated as read-only source of truth
 - **JSON responses** — portal renders HTML; API provides JSON for programmatic access
-- **Session-based auth** — login POST establishes session; subsequent requests use session cookie
-- **Stateless endpoints** — each request carries necessary parameters; server may use session for authorization
+- **Authentication (hypothetical)** — if future authorized investigation confirms authentication is needed, select an approach based on observed behavior; no login/session mechanism is established here
+- **Stateless endpoints** — each request carries necessary parameters; any authorization approach remains a future design decision
 - **Predictable URL structure** — consistent naming and parameter patterns
 
 ### 2.2 Data Model Layer
@@ -204,14 +211,14 @@ The portal has a `/(portal)/transformers` route, but detailed field data is not 
 
 | Endpoint | Method | Description | Required Auth |
 |---|---|---|---|
-| `/api/meters` | GET | List meters with pagination, search, filters | Yes (session cookie) |
-| `/api/meters/[meterId]` | GET | Individual meter details | Yes (session cookie) |
-| `/api/meters/search` | GET | Search by meterId or serialNo | Yes (session cookie) |
-| `/api/meters/status/[status]` | GET | Filter by installStatus | Yes (session cookie) |
-| `/api/transformers` | GET | List transformer network data | Yes (session cookie) |
-| `/api/hierarchy` | GET | Reconstruct meter network hierarchy from exported dataset | Yes (session cookie) |
-| `/api/login` | POST | Authenticate; establish session | No (public) |
-| `/api/export/meters` | GET | Export all meters as JSON | Yes (session cookie) |
+| `/api/meters` | GET | List meters with pagination, search, filters | Local implementation; no portal authentication |
+| `/api/meters/[meterId]` | GET | Individual meter details | Local implementation; no portal authentication |
+| `/api/meters/search` | GET | Search by meterId or serialNo | Local implementation; no portal authentication |
+| `/api/meters/status/[status]` | GET | Filter by installStatus | Local implementation; no portal authentication |
+| `/api/transformers` | GET | List transformer network data | Local implementation; no portal authentication |
+| `/api/hierarchy` | GET | Reconstruct meter network hierarchy from exported dataset | Local implementation; no portal authentication |
+| `/api/login` | POST | Hypothetical only; not implemented or verified | Not applicable |
+| `/api/export/meters` | GET | Export all meters as JSON | Local implementation; no portal authentication |
 | `/api/metadata` | GET | Data source metadata and freshness information | No (public) |
 | `/api/meters/nearby` | GET | Nearby meters using Haversine formula | No (public) |
 
@@ -322,13 +329,19 @@ Full meter record as in `meter-export.json`:
 
 **Success response (200):** Array of transformer objects with available fields. Due to limited documentation, the exact schema is noted as pending further investigation. Based on portal route `/(portal)/transformers`, the response includes network topology information and feeder associations observable from the portal.
 
-### 3.5 `POST /api/login`
+### 3.5 Hypothetical `POST /api/login` (not observed or implemented)
+
+The following request and response examples are placeholders for a possible
+future design. They are not captured portal traffic and must not be treated as
+the portal's login payload, response, or session behavior. See
+[docs/PROTOCOL.md](PROTOCOL.md) for verified observations and unresolved
+authentication questions.
 
 **Request body:**
 ```json
 {
-  "email": "user@flockenergy.com",
-  "password": "password"
+  "email": "<redacted>",
+  "password": "<redacted>"
 }
 ```
 
@@ -350,9 +363,12 @@ Full meter record as in `meter-export.json`:
 }
 ```
 
-**Set-Cookie header:** Session cookie established by server; client stores and sends on subsequent requests.
+**Hypothetical only:** The placeholder response examples do not establish that
+the portal sets a session cookie or that subsequent requests use one.
 
-**Important:** The API mirrors the portal's `POST /login` behavior. Headers `User-Agent`, `Origin`, `Referer` may be required on the client side as they were with the portal.
+**Unverified:** No evidence establishes that this design mirrors the portal's
+login behavior or that `User-Agent`, `Origin`, or `Referer` headers are
+required.
 
 ### 3.6 `GET /api/export/meters`
 
@@ -535,7 +551,7 @@ Full meter record as in `meter-export.json`:
 
 - **Dataset analysis:** Python `json.load()` on `meter-export.json`; 403 records analyzed; field structures, hierarchy levels, geo coordinates, value distributions verified
 - **Portal route mapping:** JavaScript bundle analysis; SvelteKit routes identified from matcher dictionary
-- **Authentication protocol:** Verified via Python `urllib` with `User-Agent`+`Origin`+`Referer` headers; 40+ credential patterns tested
+- **Authentication protocol:** Not verified. Earlier notes make conflicting claims about login requests and headers; see [docs/PROTOCOL.md](PROTOCOL.md).
 - **Discrepancy noted:** 405 UI meters vs. 403 export records — documented but root cause undetermined
 - **Confirmed facts vs assumptions:** Maintained strict separation throughout design document
 - **No credentials or tokens documented** beyond protocol description
@@ -547,7 +563,7 @@ Full meter record as in `meter-export.json`:
 | **Consumption data format/granularity/units** | Inspect meter details page `/(portal)/meters/[id]` via live authenticated browser; determine time-series format, interval, units |
 | **Transformer detailed fields and feeder capacities** | Inspect `/(portal)/transformers` page and/or `/(portal)/transformers/[id]` via live authenticated browser |
 | **405 UI meters vs. 403 export discrepancy root cause** | Analyze: is export a subset? Does UI count include deactivated meters? Are 2 specific meters missing from export? |
-| **Session cookie name and mechanism** | Observe session cookie setting after login; name, expiration, refresh behavior |
+| **Authentication and session behavior** | If further investigation is authorized, observe the normal user-performed login and any resulting session behavior without recording secrets; current behavior is unknown |
 | **Successful login redirect target** | Document post-login dashboard URL and content |
 | **Exact export request URL and parameters** | Capture the request triggered by "Export all meters" button |
 | **Whether `GET /api/meters/[id]` should include consumption** | Decision: include consumption if later available, or keep metadata-only and add separate endpoint |
@@ -561,7 +577,7 @@ Full meter record as in `meter-export.json`:
 1. Resolve the 405/403 meter discrepancy — determine API behavior and document
 2. Inspect consumption data format via live authenticated browser
 3. Inspect transformer page fields via live authenticated browser
-4. Document session cookie name and mechanism
+4. Verify whether session behavior needs to be documented; do not assume a cookie or mechanism
 5. Determine export request URL and parameters
 
 **Implementation stack (to be confirmed from assignment; uncertainty documented):**
@@ -572,7 +588,7 @@ Full meter record as in `meter-export.json`:
 **Endpoints to implement first (Minimum Viable API):**
 1. `GET /api/meters` — listing with pagination, search, status filter
 2. `GET /api/meters/[meterId]` — individual meter detail (metadata only, no consumption)
-3. `POST /api/login` — authentication, session establishment
+3. Authentication — only design or implement after the portal flow is verified and integration is approved
 4. `GET /api/export/meters` — full meter export
 
 **Subsequent endpoints:**

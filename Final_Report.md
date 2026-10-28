@@ -1,76 +1,106 @@
-# Phase 4 Blockade and Final Report
+# Urja Meter Ops API — Current Implementation Report
 
-## 1. Phase status
-**BLOCKED** — Phase 4 cannot proceed because the required technology stack cannot be determined from the available evidence.
+This report replaces the earlier blocker snapshot. The API has been
+implemented and regression-tested; the live portal client has not.
 
-## 2. Requirements and architecture decisions
+## Implementation
 
-Cannot be determined — the technology stack is unknown. The following was established from the investigation:
+The repository contains a read-only FastAPI service that loads
+`meter-export.json` at import time and serves its records from memory. The
+real export is intentionally excluded from Git because redistribution
+permission is unverified. A separately named synthetic fixture is available
+for tests and demos; it contains no portal records. The service does not log
+in to, refresh from, or otherwise connect to the live portal. The portal
+evidence and unresolved protocol questions are maintained in
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-- **Portal**: SvelteKit SPA at `https://urja-ops.flockenergy.tech`
-- **Dataset**: `meter-export.json` with 403 meter records, 7-level hierarchy, geolocation
-- **Authentication**: Verified protocol — `POST /login` with email/password, `User-Agent`+`Origin`+`Referer` headers
-- **API design**: Documented in `docs/API_DESIGN.md` with proposed endpoints and schemas
-- **Dataset discrepancy**: 403 export records vs. 405 UI meters noted
+## Available routes
 
-## 3. Endpoints implemented
-**Zero endpoints implemented** — Phase 4 blocked before implementation could begin.
+The application exposes the following routes:
 
-## 4. Every file created or modified
-
-- `BLOCKER_REPORT.md` — newly created blocker report (this file)
-- `docs/API_DESIGN.md` — created during Phase 3 (475 lines, proposed API design)
-- `docs/PHASE1_INVESTIGATION.md` — preserved from Phase 1 (updated with Phase 2 reference)
-- `docs/PROTOCOL.md` — created during Phase 2 (280 lines, verified protocol)
-- `meter-export.json` — pre-existing dataset (403 records, unchanged)
-- `analyze_export.py`, `examine_login.py`, `try_login.py`, `try_login2.py`, `try_login3.py`, `try_login4.py` — investigation scripts created during Phases 1-2 (now cleaned up/no longer in repo per dir listing)
-
-Actually, looking at the current repo state, the `.py` investigation scripts may have been cleaned up. Let me verify.
-
-## 5. Tests executed and actual results
-**Zero tests executed** — Phase 4 blocked before implementation. No API code to test.
-
-## 5. Known limitations and unresolved requirements
-
-| Requirement | Status | Reason |
+| Method | Path | Purpose |
 |---|---|---|
-| Technology stack determination | **BLOCKED** | Assignment PDF unreadable; no stack config in repo |
-| `GET /api/meters` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /api/meters/:meterId` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /api/meters/search` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /api/meters/status/:status` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /api/transformers` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /api/export/meters` implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| `GET /health` endpoint | **NOT STARTED** | Blocked by stack uncertainty |
-| API error handling implementation | **NOT STARTED** | Blocked by stack uncertainty |
-| Consumption data endpoint | **NOT STARTED** | Blocked by stack uncertainty; consumption data not in export |
-| Transformer data endpoint | **NOT STARTED** | Blocked by stack uncertainty; fields not fully documented |
+| GET | `/health` | Liveness probe; intentionally omitted from the OpenAPI schema. |
+| GET | `/api/meters` | Paginated listing with optional search and filters. |
+| GET | `/api/meters/search` | Search by meter ID or serial number substring. |
+| GET | `/api/meters/{meter_id}` | Retrieve a meter by ID. |
+| GET | `/api/meters/status/{status}` | Filter by installation status. |
+| GET | `/api/meters/query` | Combine supported meter attribute filters. |
+| GET | `/api/meters/nearby` | Find nearby records using exported coordinates. |
+| GET | `/api/hierarchy` | Return the hierarchy derived from meter records, optionally filtered by zone. |
+| GET | `/api/transformers` | Return unique DT groups derived from the export. |
+| GET | `/api/export/meters` | Return the complete local export. |
+| GET | `/api/metadata` | Return local dataset and file freshness metadata. |
 
-## 6. Commands to run the application locally
-**Cannot determine** — no stack configuration, no framework, no project setup files. The repository contains only the dataset and investigation documents.
+The checked-in [openapi.json](openapi.json) is valid OpenAPI 3.1 JSON and
+contains 10 documented `/api` operations with unique operation IDs.
 
-## 7. Recommended Phase 5 testing and debugging plan
-**Cannot determine** — depends on technology stack selection. If Python + FastAPI is chosen:
-- Install: `pip install fastapi uvicorn`
-- Run: `uvicorn main:app --reload`
-- Tests: `pytest` with test client
-- Health: `curl http://localhost:8000/health`
-- Meters list: `curl "http://localhost:8000/api/meters?page=1&per_page=20"`
+## Recorded verification
 
-## 8. Next steps (explicit approval required)
+- The isolated Uvicorn HTTP regression matrix returned successful responses
+  for health, listing, search, status, meter detail, transformer groups,
+  export, hierarchy, metadata, nearby, and query routes.
+- Installed meter query returned HTTP 200 with total **238**. A combined
+  filter returned **34** records.
+- `GET /api/hierarchy?zone_code=Z-01` returned HTTP 200 with branches for
+  `Z-01` only.
+- Validation and missing-resource responses were checked; the missing-meter
+  response returned 404 with structured error fields.
+- The current clean-environment HTTP run also confirmed the README sample
+  (`status=Installed&make=HPL`) returned HTTP 200, total 46, with 20 returned
+  records matching both filters.
+- The served OpenAPI JSON matches the checked-in file exactly; it contains 10
+  unique documented API operation IDs. The `/health` endpoint is intentionally
+  excluded from the schema.
+- A fresh Python 3.12.4 virtual environment installed from
+  `requirements.txt` passed `python -m pytest -q tests.py`: **17 passed, 7
+  deprecation warnings**, without a compatibility shim or global package
+  changes. `pip check` reported no broken requirements.
+- The same 17-test suite passed against the synthetic fixture in an isolated
+  copy; installed-meter query returned 238 and zone filtering returned only
+  `Z-01`.
+- An earlier unpinned global environment had a Starlette/httpx TestClient
+  incompatibility. The pinned clean environment resolved that setup problem.
+- A Uvicorn HTTP regression run on port 8003 passed the documented sample and
+  route assertions. The served `/openapi.json` now matches the checked-in
+  file exactly; it has 10 unique API operation IDs. The checked-in schema was
+  regenerated after investigating the previous differences, which were
+  generated-schema changes between the old and current FastAPI/Pydantic
+  versions.
 
-**Do you approve providing the assignment stack specification?**
+## Data and portal evidence
 
-Without the technology stack, Phase 4 cannot begin. Please provide one of the following:
+The local export contains **403 records**. The authenticated portal listing
+was later observed to show **403 total**. Older investigation documents
+reported 405, but the cause of that discrepancy is unknown and the earlier
+count is not treated as verified. See [docs/PROTOCOL.md](docs/PROTOCOL.md)
+for the scoped browser captures and export measurements.
 
-1. **The assignment PDF contents** (or a readable excerpt specifying the technology stack), or
-2. **Explicit stack specification** (e.g., "Use Python + FastAPI"), or
-3. **Confirmation that any stack may be used** (with documentation of the choice)
+Portal meter-list search, pagination, and `J100000` geography/energy requests
+were observed in the authorized browser. The login submission, authentication
+mechanism, session expiry, transformer data requests, and several other
+portal behaviors remain unverified. These observations do not make this
+service a live portal client.
 
-Once the stack is confirmed, Phase 4 can begin with the implementation of the proposed API endpoints as documented in `docs/API_DESIGN.md`.
+## Limitations and next work
 
-**Alternatively**, if the assignment allows stack choice, please confirm and I will select Python + FastAPI as the implementation stack and proceed with Phase 4.
+- Data is a static local export; it is not refreshed and can become stale.
+- A fresh checkout must provide an authorized export or manually copy the
+  synthetic fixture to `meter-export.json` before running the app or tests.
+- No live authentication, portal session management, or portal data client is
+  implemented.
+- Consumption observations and richer portal detail data are not integrated
+  into the local API.
+- The verified Python 3.12.4 dependency set is pinned in `requirements.txt`;
+  deprecation warnings should be addressed before changing that set.
+- If live integration is approved, verify the remaining portal protocol
+  behavior first, then add a client and tests without recording secrets.
 
----
+## Documentation
 
-**Please explicitly approve one of the options above so Phase 4 can proceed.**
+- [README.md](README.md) contains installation, startup, API examples, design
+  notes, intentional omissions, future improvements, and the five assignment
+  reflection answers.
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) is the evidence-qualified record of
+  portal and local-export findings.
+- [openapi.json](openapi.json) describes the API operations.
