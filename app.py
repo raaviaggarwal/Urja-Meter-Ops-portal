@@ -833,7 +833,7 @@ async def get_meter(meter_id: str) -> Dict[str, Any]:
 async def http_exception_handler(request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail, "message": exc.detail},
+        content={"error": exc.detail, "message": exc.detail, "detail": exc.detail},
     )
 
 
