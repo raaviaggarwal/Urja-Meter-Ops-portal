@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Flock Energy Meter API",
-    "description": "Read‑only API over the Flock Energy meter operations dataset.",
+    "description": "Read‐only API over the Flock Energy meter operations dataset.",
     "version": "1.0.0"
   },
   "paths": {
@@ -19,11 +19,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1‑indexed)",
+              "description": "Page number (1‐indexed)",
               "default": 1,
               "title": "Page"
             },
-            "description": "Page number (1‑indexed)"
+            "description": "Page number (1‐indexed)"
           },
           {
             "name": "per_page",
@@ -175,12 +175,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Meters Api Meters Get"
+                  "$ref": "#/components/schemas/PaginatedMeterSummaries"
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -220,12 +238,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Search Meters Api Meters Search Get"
+                  "$ref": "#/components/schemas/MeterSearchResults"
                 }
               }
             }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -263,12 +289,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response List Meters By Status Api Meters Status  Status  Get"
+                  "$ref": "#/components/schemas/MetersByStatus"
                 }
               }
             }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -286,7 +320,7 @@
     "/api/transformers": {
       "get": {
         "summary": "List Transformers",
-        "description": "Provide transformer‑derived information from the meter dataset.\n\nThis endpoint does not fabricate capacities or electrical ratings; it\nexposes the hierarchy information that is available from the meter\nrecords. Each unique DT (distribution transformer) appearing in the\ndataset is listed with its associated zone, circle, subdivision,\nsubstation, and feeder codes/names as observed in the data.\n\nThe response format is intentionally lightweight — it reflects what\ncan be derived from the 403‑record export without making assumptions\nabout fields that are not present.",
+        "description": "Provide transformer-derived information from the meter dataset.\n\nThis endpoint does not fabricate capacities or electrical ratings; it\nexposes the hierarchy information that is available from the meter\nrecords. Each unique DT (distribution transformer) appearing in the\ndataset is listed with its associated zone, circle, subdivision,\nsubstation, and feeder codes/names as observed in the data.\n\nThe response format is intentionally lightweight — it reflects what\ncan be derived from the 403-record export without making assumptions\nabout fields that are not present.",
         "operationId": "list_transformers_api_transformers_get",
         "responses": {
           "200": {
@@ -294,9 +328,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response List Transformers Api Transformers Get"
+                  "$ref": "#/components/schemas/TransformerSummaries"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
                 }
               }
             }
@@ -307,7 +349,7 @@
     "/api/export/meters": {
       "get": {
         "summary": "Export Meters",
-        "description": "Return the verified meter dataset.\n\nThis endpoint returns the 403‑record export that lives alongside the\nAPI code. It documents the known discrepancy with the portal UI (405\nmeters displayed vs. 403 records exported) without inventing the\nmissing records or their reason.",
+        "description": "Return the verified meter dataset.\n\nThis endpoint returns the 403-record export that lives alongside the\nAPI code. It documents the known discrepancy with the portal UI (405\nmeters displayed vs. 403 records exported) without inventing the\nmissing records or their reason.",
         "operationId": "export_meters_api_export_meters_get",
         "responses": {
           "200": {
@@ -315,9 +357,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Export Meters Api Export Meters Get"
+                  "$ref": "#/components/schemas/MeterExport"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
                 }
               }
             }
@@ -328,7 +378,7 @@
     "/api/metadata": {
       "get": {
         "summary": "Get Metadata",
-        "description": "Get data source metadata and freshness information.\n\nReturns metadata about the meter dataset including:\n- Record count\n- Source filename\n- File modification time (local file system metadata)\n- Freshness policy\n\nThis endpoint does not connect to the live portal and does not\nprovide real-time data. All data comes from the static export\nfile meter-export.json alongside the API code.",
+        "description": "Get data source metadata and freshness information.\n\nReturns metadata about the meter dataset including:\n- Record count\n- Source filename\n- File modification time (local file system metadata, captured at startup)\n- Freshness policy\n\nThis endpoint does not connect to the live portal and does not\nprovide real-time data. All data comes from the static export\nfile meter-export.json alongside the API code.",
         "operationId": "get_metadata_api_metadata_get",
         "responses": {
           "200": {
@@ -336,9 +386,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Get Metadata Api Metadata Get"
+                  "$ref": "#/components/schemas/MeterDatasetMetadata"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
                 }
               }
             }
@@ -358,6 +416,8 @@
             "required": true,
             "schema": {
               "type": "number",
+              "maximum": 90,
+              "minimum": -90,
               "description": "Latitude in decimal degrees, -90 to 90",
               "title": "Latitude"
             },
@@ -369,6 +429,8 @@
             "required": true,
             "schema": {
               "type": "number",
+              "maximum": 180,
+              "minimum": -180,
               "description": "Longitude in decimal degrees, -180 to 180",
               "title": "Longitude"
             },
@@ -394,12 +456,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Nearby Meters Api Meters Nearby Get"
+                  "$ref": "#/components/schemas/NearbyMeters"
                 }
               }
             }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -445,12 +525,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Hierarchy Api Hierarchy Get"
+                  "$ref": "#/components/schemas/MeterHierarchyTree"
                 }
               }
             }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -624,11 +722,11 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1‑indexed)",
+              "description": "Page number (1‐indexed)",
               "default": 1,
               "title": "Page"
             },
-            "description": "Page number (1‑indexed)"
+            "description": "Page number (1‐indexed)"
           },
           {
             "name": "per_page",
@@ -651,12 +749,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Query Meters Api Meters Query Get"
+                  "$ref": "#/components/schemas/PaginatedMeterSummaries"
                 }
               }
             }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -693,12 +799,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Meter Api Meters  Meter Id  Get"
+                  "$ref": "#/components/schemas/MeterRecord"
                 }
               }
             }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           },
           "422": {
             "description": "Validation Error",
@@ -716,6 +840,108 @@
   },
   "components": {
     "schemas": {
+      "APIErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message",
+          "detail"
+        ],
+        "title": "APIErrorResponse"
+      },
+      "DatasetBreakdown": {
+        "properties": {
+          "phase_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Phase Types"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statuses"
+          },
+          "makes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Makes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase_types",
+          "statuses",
+          "makes"
+        ],
+        "title": "DatasetBreakdown"
+      },
+      "FreshnessPolicy": {
+        "properties": {
+          "policy": {
+            "type": "string",
+            "title": "Policy"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy",
+          "description"
+        ],
+        "title": "FreshnessPolicy"
+      },
+      "GeoPoint": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "lng": {
+            "type": "number",
+            "title": "Lng"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat",
+          "lng"
+        ],
+        "title": "GeoPoint"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -728,6 +954,473 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HierarchyNode": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "code"
+        ],
+        "title": "HierarchyNode"
+      },
+      "InternalErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "InternalErrorResponse"
+      },
+      "MeterDatasetMetadata": {
+        "properties": {
+          "record_count": {
+            "type": "integer",
+            "title": "Record Count"
+          },
+          "source_file": {
+            "type": "string",
+            "title": "Source File"
+          },
+          "file_modification_time": {
+            "type": "string",
+            "title": "File Modification Time"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessPolicy"
+          },
+          "dataset": {
+            "$ref": "#/components/schemas/DatasetBreakdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_count",
+          "source_file",
+          "file_modification_time",
+          "freshness",
+          "dataset"
+        ],
+        "title": "MeterDatasetMetadata"
+      },
+      "MeterExport": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/MeterRecord"
+            },
+            "type": "array",
+            "title": "Meters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "meters"
+        ],
+        "title": "MeterExport"
+      },
+      "MeterHierarchySummary": {
+        "properties": {
+          "zone": {
+            "$ref": "#/components/schemas/HierarchyNode"
+          },
+          "dt": {
+            "$ref": "#/components/schemas/HierarchyNode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zone",
+          "dt"
+        ],
+        "title": "MeterHierarchySummary"
+      },
+      "MeterHierarchyTree": {
+        "properties": {
+          "zones": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Zones"
+          },
+          "total_records": {
+            "type": "integer",
+            "title": "Total Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zones",
+          "total_records"
+        ],
+        "title": "MeterHierarchyTree"
+      },
+      "MeterRecord": {
+        "properties": {
+          "meterId": {
+            "type": "string",
+            "title": "Meterid"
+          },
+          "serialNo": {
+            "type": "string",
+            "title": "Serialno"
+          },
+          "make": {
+            "type": "string",
+            "title": "Make"
+          },
+          "phaseType": {
+            "type": "string",
+            "title": "Phasetype"
+          },
+          "installStatus": {
+            "type": "string",
+            "title": "Installstatus"
+          },
+          "installType": {
+            "type": "string",
+            "title": "Installtype"
+          },
+          "build": {
+            "type": "string",
+            "title": "Build"
+          },
+          "dtCode": {
+            "type": "string",
+            "title": "Dtcode"
+          },
+          "hierarchy": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Hierarchy"
+          },
+          "geo": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Geo"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "meterId",
+          "serialNo",
+          "make",
+          "phaseType",
+          "installStatus",
+          "installType",
+          "build",
+          "dtCode",
+          "hierarchy",
+          "geo"
+        ],
+        "title": "MeterRecord",
+        "description": "Full meter record as stored in the dataset.\n\nExtra fields present in the source record are preserved so the endpoint\nremains a faithful pass-through regardless of schema evolution."
+      },
+      "MeterSearchResults": {
+        "properties": {
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/MeterSummary"
+            },
+            "type": "array",
+            "title": "Meters"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meters",
+          "total",
+          "query"
+        ],
+        "title": "MeterSearchResults"
+      },
+      "MeterSummary": {
+        "properties": {
+          "meterId": {
+            "type": "string",
+            "title": "Meterid"
+          },
+          "serialNo": {
+            "type": "string",
+            "title": "Serialno"
+          },
+          "make": {
+            "type": "string",
+            "title": "Make"
+          },
+          "phaseType": {
+            "type": "string",
+            "title": "Phasetype"
+          },
+          "installStatus": {
+            "type": "string",
+            "title": "Installstatus"
+          },
+          "dtCode": {
+            "type": "string",
+            "title": "Dtcode"
+          },
+          "hierarchy": {
+            "$ref": "#/components/schemas/MeterHierarchySummary"
+          },
+          "geo": {
+            "$ref": "#/components/schemas/GeoPoint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meterId",
+          "serialNo",
+          "make",
+          "phaseType",
+          "installStatus",
+          "dtCode",
+          "hierarchy",
+          "geo"
+        ],
+        "title": "MeterSummary"
+      },
+      "MetersByStatus": {
+        "properties": {
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/MeterSummary"
+            },
+            "type": "array",
+            "title": "Meters"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meters",
+          "total",
+          "status",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "MetersByStatus"
+      },
+      "NearbyMeterItem": {
+        "properties": {
+          "meterId": {
+            "type": "string",
+            "title": "Meterid"
+          },
+          "distance_km": {
+            "type": "number",
+            "title": "Distance Km"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meterId",
+          "distance_km"
+        ],
+        "title": "NearbyMeterItem"
+      },
+      "NearbyMeters": {
+        "properties": {
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/NearbyMeterItem"
+            },
+            "type": "array",
+            "title": "Meters"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meters",
+          "total"
+        ],
+        "title": "NearbyMeters"
+      },
+      "PaginatedMeterSummaries": {
+        "properties": {
+          "meters": {
+            "items": {
+              "$ref": "#/components/schemas/MeterSummary"
+            },
+            "type": "array",
+            "title": "Meters"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "meters",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "PaginatedMeterSummaries"
+      },
+      "TransformerSummaries": {
+        "properties": {
+          "transformers": {
+            "items": {
+              "$ref": "#/components/schemas/TransformerSummary"
+            },
+            "type": "array",
+            "title": "Transformers"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transformers",
+          "total"
+        ],
+        "title": "TransformerSummaries"
+      },
+      "TransformerSummary": {
+        "properties": {
+          "dtCode": {
+            "type": "string",
+            "title": "Dtcode"
+          },
+          "dtName": {
+            "type": "string",
+            "title": "Dtname"
+          },
+          "zoneCode": {
+            "type": "string",
+            "title": "Zonecode"
+          },
+          "zoneName": {
+            "type": "string",
+            "title": "Zonename"
+          },
+          "circleCode": {
+            "type": "string",
+            "title": "Circlecode"
+          },
+          "circleName": {
+            "type": "string",
+            "title": "Circlename"
+          },
+          "divisionCode": {
+            "type": "string",
+            "title": "Divisioncode"
+          },
+          "divisionName": {
+            "type": "string",
+            "title": "Divisionname"
+          },
+          "substationCode": {
+            "type": "string",
+            "title": "Substationcode"
+          },
+          "substationName": {
+            "type": "string",
+            "title": "Substationname"
+          },
+          "feederCode": {
+            "type": "string",
+            "title": "Feedercode"
+          },
+          "feederName": {
+            "type": "string",
+            "title": "Feedername"
+          },
+          "meterCount": {
+            "type": "integer",
+            "title": "Metercount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dtCode",
+          "dtName",
+          "zoneCode",
+          "zoneName",
+          "circleCode",
+          "circleName",
+          "divisionCode",
+          "divisionName",
+          "substationCode",
+          "substationName",
+          "feederCode",
+          "feederName",
+          "meterCount"
+        ],
+        "title": "TransformerSummary"
       },
       "ValidationError": {
         "properties": {

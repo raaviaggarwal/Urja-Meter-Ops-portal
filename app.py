@@ -1,58 +1,306 @@
 """Flock Energy API - FastAPI implementation for meter operations dataset."""
 
 import json
+import logging
+import math
 import os
 from typing import Optional, List, Dict, Any
+
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Data loading
+# Response models
+# ---------------------------------------------------------------------------
+
+
+class GeoPoint(BaseModel):
+    lat: float
+    lng: float
+
+
+class HierarchyNode(BaseModel):
+    name: str
+    code: str
+
+
+class MeterHierarchySummary(BaseModel):
+    zone: HierarchyNode
+    dt: HierarchyNode
+
+
+class MeterSummary(BaseModel):
+    meterId: str
+    serialNo: str
+    make: str
+    phaseType: str
+    installStatus: str
+    dtCode: str
+    hierarchy: MeterHierarchySummary
+    geo: GeoPoint
+
+
+class MeterRecord(BaseModel):
+    """Full meter record as stored in the dataset.
+
+    Extra fields present in the source record are preserved so the endpoint
+    remains a faithful pass-through regardless of schema evolution.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    meterId: str
+    serialNo: str
+    make: str
+    phaseType: str
+    installStatus: str
+    installType: str
+    build: str
+    dtCode: str
+    hierarchy: Dict[str, Any]
+    geo: Dict[str, Any]
+
+
+class PaginatedMeterSummaries(BaseModel):
+    meters: List[MeterSummary]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
+class MeterSearchResults(BaseModel):
+    meters: List[MeterSummary]
+    total: int
+    query: str
+
+
+class MetersByStatus(BaseModel):
+    meters: List[MeterSummary]
+    total: int
+    status: str
+    page: int
+    per_page: int
+    total_pages: int
+
+
+class NearbyMeterItem(BaseModel):
+    meterId: str
+    distance_km: float
+
+
+class NearbyMeters(BaseModel):
+    meters: List[NearbyMeterItem]
+    total: int
+
+
+class TransformerSummary(BaseModel):
+    dtCode: str
+    dtName: str
+    zoneCode: str
+    zoneName: str
+    circleCode: str
+    circleName: str
+    divisionCode: str
+    divisionName: str
+    substationCode: str
+    substationName: str
+    feederCode: str
+    feederName: str
+    meterCount: int
+
+
+class TransformerSummaries(BaseModel):
+    transformers: List[TransformerSummary]
+    total: int
+
+
+class MeterExport(BaseModel):
+    count: int
+    meters: List[MeterRecord]
+
+
+class FreshnessPolicy(BaseModel):
+    policy: str
+    description: str
+    last_updated: Optional[str] = None
+
+
+class DatasetBreakdown(BaseModel):
+    phase_types: List[str]
+    statuses: List[str]
+    makes: List[str]
+
+
+class MeterDatasetMetadata(BaseModel):
+    record_count: int
+    source_file: str
+    file_modification_time: str
+    freshness: FreshnessPolicy
+    dataset: DatasetBreakdown
+
+
+class MeterHierarchyTree(BaseModel):
+    zones: Dict[str, Any]
+    total_records: int
+
+
+class APIErrorResponse(BaseModel):
+    error: str
+    message: str
+    detail: str
+
+
+class InternalErrorResponse(BaseModel):
+    error: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Dataset loading
 # ---------------------------------------------------------------------------
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "meter-export.json")
 
-def load_dataset() -> List[Dict[str, Any]]:
-    """Load and validate the meter dataset at startup.
 
-    Returns the dataset list. Raises RuntimeError if the file is missing or
-    malformed so the service fails fast rather than returning confusing
-    500 errors on every request.
+def load_dataset_snapshot(path: str) -> tuple[list, float]:
+    """Load, parse, and validate a meter JSON file.
+
+    Returns ``(records, mtime)`` where *mtime* is ``os.stat().st_mtime`` at
+    the time of loading.  Raises ``RuntimeError`` with a clear, actionable
+    message — without including record values — if the file is missing,
+    unreadable, not a JSON array, or contains structurally invalid records
+    (missing required fields, duplicate IDs, malformed hierarchy or
+    coordinates).
+
+    This is the single authoritative loader used both at startup and in tests.
+    No partial dataset is returned; either all records pass validation or an
+    exception is raised so callers never receive a silently corrupt snapshot.
     """
-    if not os.path.isfile(DATA_PATH):
-        raise RuntimeError(f"Dataset file not found at {DATA_PATH}")
     try:
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        stat = os.stat(path)
+        mtime = stat.st_mtime
+    except OSError as exc:
+        raise RuntimeError(
+            f"Dataset file not accessible ({type(exc).__name__}): {path}"
+        ) from exc
+
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse JSON from {DATA_PATH}: {exc}") from exc
+        raise RuntimeError(
+            f"invalid JSON at line {exc.lineno}, column {exc.colno}: {path}"
+        ) from exc
+    except UnicodeDecodeError:
+        raise RuntimeError(
+            f"Dataset file is not valid UTF-8: {path}"
+        ) from None
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to read dataset file ({type(exc).__name__}): {path}"
+        ) from exc
+
     if not isinstance(data, list):
-        raise RuntimeError(f"Dataset at {DATA_PATH} is not a JSON array")
-    # Validate that every record has the expected top-level fields
-    expected_fields = {
+        raise RuntimeError(
+            f"Dataset must be an array, got {type(data).__name__}: {path}"
+        )
+
+    # Validate each record without echoing record values into error messages.
+    _REQUIRED = {
         "meterId", "serialNo", "make", "phaseType", "installStatus",
-        "installType", "build", "dtCode", "hierarchy", "geo"
+        "installType", "build", "dtCode", "hierarchy", "geo",
     }
-    for i, record in enumerate(data):
-        missing = expected_fields - set(record.keys())
-        if missing:
-            raise RuntimeError(
-                f"Record #{i} is missing required fields: {sorted(missing)}"
-            )
-    return data
+    _HIERARCHY_LEVELS = (
+        "zone", "circle", "division", "subdivision", "substation", "feeder", "dt",
+    )
+    seen_ids: dict[str, int] = {}
+    errors: list[str] = []
+
+    for i, record in enumerate(data, start=1):
+        if not isinstance(record, dict):
+            errors.append(f"record {i}: expected an object, got {type(record).__name__}")
+            continue
+
+        for field in sorted(_REQUIRED - set(record.keys())):
+            errors.append(f"record {i}: missing required field '{field}'")
+
+        meter_id = record.get("meterId")
+        if not isinstance(meter_id, str) or not meter_id.strip():
+            errors.append(f"record {i}: 'meterId' must be a non-empty string")
+        else:
+            prev = seen_ids.get(meter_id)
+            if prev is not None:
+                errors.append(
+                    f"record {i}: 'meterId' duplicates record {prev}"
+                )
+            else:
+                seen_ids[meter_id] = i
+
+        hierarchy = record.get("hierarchy")
+        if "hierarchy" in record:
+            if not isinstance(hierarchy, dict):
+                errors.append(f"record {i}: 'hierarchy' must be an object")
+            else:
+                for level in _HIERARCHY_LEVELS:
+                    lv = hierarchy.get(level)
+                    if level not in hierarchy:
+                        errors.append(f"record {i}: 'hierarchy.{level}' is required")
+                    elif not isinstance(lv, dict):
+                        errors.append(f"record {i}: 'hierarchy.{level}' must be an object")
+                    else:
+                        for attr in ("name", "code"):
+                            if not isinstance(lv.get(attr), str):
+                                errors.append(
+                                    f"record {i}: 'hierarchy.{level}.{attr}' must be a string"
+                                )
+
+        geo = record.get("geo")
+        if "geo" in record:
+            if not isinstance(geo, dict):
+                errors.append(f"record {i}: 'geo' must be an object")
+            else:
+                for coord, lo, hi in (("lat", -90, 90), ("lng", -180, 180)):
+                    val = geo.get(coord)
+                    if not isinstance(val, (int, float)) or isinstance(val, bool) or not math.isfinite(val):
+                        errors.append(f"record {i}: 'geo.{coord}' must be a finite number")
+                    elif not lo <= val <= hi:
+                        errors.append(f"record {i}: 'geo.{coord}' is outside its valid range")
+
+    if errors:
+        raise RuntimeError(
+            "Dataset validation failed with "
+            f"{len(errors)} error(s):\n" + "\n".join(errors[:20])
+        )
+
+    return data, mtime
+
+
+def load_dataset() -> List[Dict[str, Any]]:
+    """Legacy loader used by the startup block; delegates to load_dataset_snapshot."""
+    records, _ = load_dataset_snapshot(DATA_PATH)
+    return records
+
 
 # Load dataset once at startup; the original file is never modified.
+# If the dataset cannot be loaded the operator must fix the data-path problem
+# before the service is usable.  We log the error and leave dataset empty so
+# the service starts but every data route returns a 503-level response via the
+# general exception handler (rather than silently returning empty results).
+_dataset_load_error: Optional[str] = None
 try:
     dataset = load_dataset()
     TOTAL_RECORDS = len(dataset)
+    DATASET_FILE_MTIME: Optional[float] = os.stat(DATA_PATH).st_mtime
 except RuntimeError as exc:
-    # If the dataset cannot be loaded, the app will start but every
-    # request that touches the data will return a 500. This is intentional
-    # — the operator must fix the data-path problem before the service
-    # is usable.
+    logger.error("Dataset load failed: %s", exc)
+    _dataset_load_error = str(exc)
     dataset = []
     TOTAL_RECORDS = 0
+    DATASET_FILE_MTIME = None
 
 # ---------------------------------------------------------------------------
 # In-memory indexes (built once at startup)
@@ -61,7 +309,7 @@ except RuntimeError as exc:
 # map meterId -> record
 _by_id: Dict[str, Dict[str, Any]] = {r["meterId"]: r for r in dataset}
 
-# map serialNo -> record (last wins if duplicates exist)
+# map serialNo -> record (first wins to avoid last-write silently masking dups)
 _by_serial: Dict[str, Dict[str, Any]] = {}
 for r in dataset:
     _by_serial.setdefault(r["serialNo"], r)
@@ -133,7 +381,8 @@ for r in dataset:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _summary_record(r: Dict[str, Any]) -> Dict[str, Any]:
+
+def _summary_record(r: Dict[str, Any]) -> dict:
     """Return a lightweight summary record for listing endpoints."""
     h = r.get("hierarchy", {})
     return {
@@ -151,13 +400,8 @@ def _summary_record(r: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _full_record(r: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the complete meter record as stored in the dataset."""
-    return dict(r)
-
-
 def _parse_bool(v: Any) -> Optional[bool]:
-    """Coerce a query‑parameter value to an optional boolean."""
+    """Coerce a query-parameter value to an optional boolean."""
     if v is None:
         return None
     if isinstance(v, bool):
@@ -171,7 +415,7 @@ def _parse_bool(v: Any) -> Optional[bool]:
 
 app = FastAPI(
     title="Flock Energy Meter API",
-    description="Read‑only API over the Flock Energy meter operations dataset.",
+    description="Read\u2010only API over the Flock Energy meter operations dataset.",
     version="1.0.0",
 )
 
@@ -183,14 +427,15 @@ async def health() -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Helper: parse pagination params
+# Helper: paginate a list of meterIds
 # ---------------------------------------------------------------------------
+
 
 def _paginate(
     items: List[str],
     page: int = 1,
     per_page: int = 20,
-) -> Dict[str, Any]:
+) -> dict:
     """Return a pagination wrapper for a list of meterIds."""
     page = max(page, 1)
     per_page = max(per_page, 1)
@@ -212,33 +457,41 @@ def _paginate(
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@app.get("/api/meters", response_model=dict)
+
+@app.get(
+    "/api/meters",
+    response_model=PaginatedMeterSummaries,
+    responses={
+        400: {"model": APIErrorResponse},
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def list_meters(
-    page: int = Query(1, ge=1, description="Page number (1‑indexed)"),
+    page: int = Query(1, ge=1, description="Page number (1\u2010indexed)"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Substring search on meterId or serialNo"),
     status: Optional[str] = Query(
-        None, regex=r"^(Installed|Faulty|Decommissioned)$",
+        None, pattern=r"^(Installed|Faulty|Decommissioned)$",
         description="Filter by installation status"
     ),
     phase_type: Optional[str] = Query(
-        None, regex=r"^(single|three)$",
+        None, pattern=r"^(single|three)$",
         description="Filter by electrical phase type"
     ),
     build: Optional[str] = Query(
-        None, regex=r"^(legacy|v2)$",
+        None, pattern=r"^(legacy|v2)$",
         description="Filter by build version"
     ),
     zone_code: Optional[str] = Query(
         None, description="Filter by zone code (Z-01, Z-02, Z-03)"
     ),
     division_code: Optional[str] = Query(
-        None, description="Filter by division code (D-01 … D-10)"
+        None, description="Filter by division code (D-01 \u2026 D-10)"
     ),
     dt_code: Optional[str] = Query(
-        None, description="Filter by DT code (DT-001 … DT-040)"
+        None, description="Filter by DT code (DT-001 \u2026 DT-040)"
     ),
-) -> Dict[str, Any]:
+) -> dict:
     """List meters with pagination, search, and hierarchical filters.
 
     The returned dict contains:
@@ -257,7 +510,7 @@ async def list_meters(
     elif build:
         meter_ids = _by_build.get(build, [])
 
-    # Hierarchy filters (AND‑combined with each other and with prior filters)
+    # Hierarchy filters (AND-combined with each other and with prior filters)
     if zone_code:
         meter_ids = _by_zone.get(zone_code, [])
     if division_code:
@@ -292,16 +545,22 @@ async def list_meters(
     }
 
 
-@app.get("/api/meters/search", response_model=dict)
+@app.get(
+    "/api/meters/search",
+    response_model=MeterSearchResults,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def search_meters(
     query: str = Query(..., min_length=1, description="Substring to search on meterId or serialNo"),
-) -> Dict[str, Any]:
+) -> dict:
     """Search meters by meterId or serial number substring.
 
     Returns matching records as summary objects.
     """
     search_lower = query.lower()
-    matched: List[Dict[str, Any]] = []
+    matched: List[dict] = []
     for mid, rec in _by_id.items():
         sid = rec.get("serialNo", "").lower()
         if search_lower in mid.lower() or search_lower in sid:
@@ -314,10 +573,16 @@ async def search_meters(
     }
 
 
-@app.get("/api/meters/status/{status}", response_model=dict)
+@app.get(
+    "/api/meters/status/{status}",
+    response_model=MetersByStatus,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def list_meters_by_status(
-    status: str = Path(..., regex=r"^(Installed|Faulty|Decommissioned)$"),
-) -> Dict[str, Any]:
+    status: str = Path(..., pattern=r"^(Installed|Faulty|Decommissioned)$"),
+) -> dict:
     """List meters filtered by installation status.
 
     Returns a summary list and the total count for the given status.
@@ -335,9 +600,15 @@ async def list_meters_by_status(
     }
 
 
-@app.get("/api/transformers", response_model=dict)
-async def list_transformers() -> Dict[str, Any]:
-    """Provide transformer‑derived information from the meter dataset.
+@app.get(
+    "/api/transformers",
+    response_model=TransformerSummaries,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
+async def list_transformers() -> dict:
+    """Provide transformer-derived information from the meter dataset.
 
     This endpoint does not fabricate capacities or electrical ratings; it
     exposes the hierarchy information that is available from the meter
@@ -346,7 +617,7 @@ async def list_transformers() -> Dict[str, Any]:
     substation, and feeder codes/names as observed in the data.
 
     The response format is intentionally lightweight — it reflects what
-    can be derived from the 403‑record export without making assumptions
+    can be derived from the 403-record export without making assumptions
     about fields that are not present.
     """
     # Collect unique DT entries
@@ -373,7 +644,10 @@ async def list_transformers() -> Dict[str, Any]:
             "substationName": h.get("substation", {}).get("name", ""),
             "feederCode": h.get("feeder", {}).get("code", ""),
             "feederName": h.get("feeder", {}).get("name", ""),
-            "meterCount": sum(1 for r2 in dataset if r2.get("hierarchy", {}).get("dt", {}).get("code", "") == dt_code),
+            "meterCount": sum(
+                1 for r2 in dataset
+                if r2.get("hierarchy", {}).get("dt", {}).get("code", "") == dt_code
+            ),
         }
 
     return {
@@ -382,11 +656,17 @@ async def list_transformers() -> Dict[str, Any]:
     }
 
 
-@app.get("/api/export/meters", response_model=dict)
-async def export_meters() -> Dict[str, Any]:
+@app.get(
+    "/api/export/meters",
+    response_model=MeterExport,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
+async def export_meters() -> dict:
     """Return the verified meter dataset.
 
-    This endpoint returns the 403‑record export that lives alongside the
+    This endpoint returns the 403-record export that lives alongside the
     API code. It documents the known discrepancy with the portal UI (405
     meters displayed vs. 403 records exported) without inventing the
     missing records or their reason.
@@ -401,14 +681,21 @@ async def export_meters() -> Dict[str, Any]:
 # Metadata endpoint
 # ---------------------------------------------------------------------------
 
-@app.get("/api/metadata", response_model=dict)
-async def get_metadata() -> Dict[str, Any]:
+
+@app.get(
+    "/api/metadata",
+    response_model=MeterDatasetMetadata,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
+async def get_metadata() -> dict:
     """Get data source metadata and freshness information.
 
     Returns metadata about the meter dataset including:
     - Record count
     - Source filename
-    - File modification time (local file system metadata)
+    - File modification time (local file system metadata, captured at startup)
     - Freshness policy
 
     This endpoint does not connect to the live portal and does not
@@ -416,23 +703,27 @@ async def get_metadata() -> Dict[str, Any]:
     file meter-export.json alongside the API code.
     """
     import datetime
-    file_path = os.path.join(os.path.dirname(__file__), "meter-export.json")
-    stat = os.stat(file_path)
-    mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+
+    mtime_iso: Optional[str]
+    if DATASET_FILE_MTIME is not None:
+        mtime_iso = datetime.datetime.fromtimestamp(DATASET_FILE_MTIME).isoformat()
+    else:
+        mtime_iso = None
+
     return {
         "record_count": TOTAL_RECORDS,
         "source_file": "meter-export.json",
-        "file_modification_time": mtime.isoformat(),
+        "file_modification_time": mtime_iso,
         "freshness": {
             "policy": "static_export",
             "description": "Data comes from a static export file; no live portal connection.",
-            "last_updated": None
+            "last_updated": None,
         },
         "dataset": {
             "phase_types": list(set(r.get("phaseType") for r in dataset)),
             "statuses": list(set(r.get("installStatus") for r in dataset)),
             "makes": list(set(r.get("make") for r in dataset)),
-        }
+        },
     }
 
 
@@ -440,12 +731,20 @@ async def get_metadata() -> Dict[str, Any]:
 # Nearby meters endpoint (Haversine formula)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/meters/nearby", response_model=dict)
+
+@app.get(
+    "/api/meters/nearby",
+    response_model=NearbyMeters,
+    responses={
+        400: {"model": APIErrorResponse},
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def nearby_meters(
-    latitude: float = Query(..., description="Latitude in decimal degrees, -90 to 90"),
-    longitude: float = Query(..., description="Longitude in decimal degrees, -180 to 180"),
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude in decimal degrees, -90 to 90"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude in decimal degrees, -180 to 180"),
     radius_km: float = Query(..., gt=0, le=500, description="Search radius in kilometres"),
-) -> Dict[str, Any]:
+) -> dict:
     """Find meters near a given location using the Haversine formula.
 
     Parameters:
@@ -456,7 +755,6 @@ async def nearby_meters(
     Returns meters sorted by ascending distance with their distance in km.
     Results with missing or nil coordinates are silently skipped.
     """
-    import math
     if not -90 <= latitude <= 90:
         raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90")
     if not -180 <= longitude <= 180:
@@ -491,7 +789,8 @@ async def nearby_meters(
 # Hierarchy endpoint
 # ---------------------------------------------------------------------------
 
-def _build_hierarchy(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+def _build_hierarchy(records: List[Dict[str, Any]]) -> dict:
     """Build a tree representing the meter network hierarchy.
 
     Returns a nested dict with zones → circles → divisions → subdivisions
@@ -499,13 +798,12 @@ def _build_hierarchy(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
     counts and sample meterIds.  Empty hierarchy codes are preserved with
     a special marker so callers can distinguish "no code" from "absent level".
     """
-    # Initialise empty nested structure
     hierarchy: Dict[str, Any] = {
         "zones": {},
-        "total_records": len(dataset),
+        "total_records": len(records),
     }
 
-    for r in dataset:
+    for r in records:
         h = r.get("hierarchy", {})
         zone_name = h.get("zone", {}).get("name", "")
         zone_code = h.get("zone", {}).get("code", "")
@@ -602,12 +900,19 @@ def _build_hierarchy(dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
 _hierarchy_cache = _build_hierarchy(dataset)
 
 
-@app.get("/api/hierarchy", response_model=dict)
+@app.get(
+    "/api/hierarchy",
+    response_model=MeterHierarchyTree,
+    responses={
+        404: {"model": APIErrorResponse},
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def get_hierarchy(
     zone_code: Optional[str] = Query(
         None, description="Filter by zone code (e.g., Z-01, Z-02, Z-03)"
     ),
-) -> Dict[str, Any]:
+) -> dict:
     """Reconstructed meter network hierarchy from the exported dataset.
 
     Returns a nested tree showing zones → circles → divisions → subdivisions
@@ -621,11 +926,8 @@ async def get_hierarchy(
     - zones: dict of zone_name → {code, circles: dict}
     - total_records: total meters in the dataset (403)
     """
-    # If a zone_code filter is provided, walk the pre-built tree and
-    # return only the matching subtree.
     if zone_code:
         zones = _hierarchy_cache.get("zones", {})
-        # Find matching zone
         matching_zone = None
         matching_zone_name = None
         for z_name, z_data in zones.items():
@@ -653,19 +955,21 @@ async def get_hierarchy(
 # Combined attribute filtering endpoint
 # ---------------------------------------------------------------------------
 
-def _attrib_filter(items: List[str],
-                   status: Optional[str] = None,
-                   make: Optional[str] = None,
-                   phase_type: Optional[str] = None,
-                   install_type: Optional[str] = None,
-                   dt_code: Optional[str] = None,
-                   zone_code: Optional[str] = None,
-                   circle_code: Optional[str] = None,
-                   feeder_code: Optional[str] = None,
-                   ) -> List[str]:
-    """Apply AND‑combined attribute filters to a list of meterIds.
 
-    Parameters are matched against the in‑memory indexes built at startup.
+def _attrib_filter(
+    items: List[str],
+    status: Optional[str] = None,
+    make: Optional[str] = None,
+    phase_type: Optional[str] = None,
+    install_type: Optional[str] = None,
+    dt_code: Optional[str] = None,
+    zone_code: Optional[str] = None,
+    circle_code: Optional[str] = None,
+    feeder_code: Optional[str] = None,
+) -> List[str]:
+    """Apply AND-combined attribute filters to a list of meterIds.
+
+    Parameters are matched against the in-memory indexes built at startup.
     Unknown filter values simply narrow results to 0 matches.
     """
     meter_ids: List[str] = list(_by_id.keys())
@@ -682,46 +986,40 @@ def _attrib_filter(items: List[str],
     elif zone_code:
         meter_ids = _by_zone.get(zone_code, [])
     elif circle_code:
-        # circle_code: filter by circle code; some records have empty code
-        meter_ids = [_mid for mid in meter_ids
-                     if _by_id.get(mid, {}).get("hierarchy", {}).get("circle", {}).get("code", "") == circle_code]
+        meter_ids = [
+            mid for mid in meter_ids
+            if _by_id.get(mid, {}).get("hierarchy", {}).get("circle", {}).get("code", "") == circle_code
+        ]
     elif feeder_code:
-        meter_ids = [_mid for mid in meter_ids
-                     if _by_id.get(mid, {}).get("hierarchy", {}).get("feeder", {}).get("code", "") == feeder_code]
+        meter_ids = [
+            mid for mid in meter_ids
+            if _by_id.get(mid, {}).get("hierarchy", {}).get("feeder", {}).get("code", "") == feeder_code
+        ]
 
-    # Remaining filters that aren't covered by the indexed lookups above:
-    # Apply per‑record checks for make, installType, and any remaining dtCode
-    # when it wasn't caught by the indexed path.
+    # Remaining filters applied per record
     filtered: List[str] = []
     for mid in meter_ids:
         rec = _by_id.get(mid)
         if rec is None:
             continue
-        # status filter already handled above; skip re-check
         if make and rec.get("make", "") != make:
             continue
         if phase_type and rec.get("phaseType", "") != phase_type:
             continue
         if install_type and rec.get("installType", "") != install_type:
             continue
-        # dtCode: check both the explicit dtCode field and the hierarchy dt
         rec_dt = rec.get("dtCode", "")
         rec_h_dt = rec.get("hierarchy", {}).get("dt", {}).get("code", "")
-        rec_dt_match = (dt_code is not None and
-                        (rec_dt == dt_code or rec_h_dt == dt_code))
-        if dt_code and not rec_dt_match:
+        if dt_code and rec_dt != dt_code and rec_h_dt != dt_code:
             continue
-        # zone_code from hierarchy
         if zone_code:
             rec_zone = rec.get("hierarchy", {}).get("zone", {}).get("code", "")
             if rec_zone != zone_code:
                 continue
-        # circle_code from hierarchy
         if circle_code:
             rec_circle = rec.get("hierarchy", {}).get("circle", {}).get("code", "")
             if rec_circle != circle_code:
                 continue
-        # feeder_code from hierarchy
         if feeder_code:
             rec_feeder = rec.get("hierarchy", {}).get("feeder", {}).get("code", "")
             if rec_feeder != feeder_code:
@@ -731,15 +1029,26 @@ def _attrib_filter(items: List[str],
     return filtered
 
 
-@app.get("/api/meters/query", response_model=dict)
+@app.get(
+    "/api/meters-query",
+    response_model=PaginatedMeterSummaries,
+    include_in_schema=False,
+)
+@app.get(
+    "/api/meters/query",
+    response_model=PaginatedMeterSummaries,
+    responses={
+        500: {"model": InternalErrorResponse},
+    },
+)
 async def query_meters(
     status: Optional[str] = Query(
-        None, regex=r"^(Installed|Faulty|Decommissioned)$",
+        None, pattern=r"^(Installed|Faulty|Decommissioned)$",
         description="Filter by installation status"
     ),
     make: Optional[str] = Query(None, description="Filter by meter make"),
     phase_type: Optional[str] = Query(
-        None, regex=r"^(single|three)$",
+        None, pattern=r"^(single|three)$",
         description="Filter by electrical phase type"
     ),
     install_type: Optional[str] = Query(
@@ -757,9 +1066,9 @@ async def query_meters(
     feeder_code: Optional[str] = Query(
         None, description="Filter by feeder code (e.g., F-001, or empty)"
     ),
-    page: int = Query(1, ge=1, description="Page number (1‑indexed)"),
+    page: int = Query(1, ge=1, description="Page number (1\u2010indexed)"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-) -> Dict[str, Any]:
+) -> dict:
     """List meters with combined attribute filtering (AND semantics).
 
     Supports filtering by any combination of:
@@ -813,8 +1122,15 @@ async def query_meters(
     }
 
 
-@app.get("/api/meters/{meter_id}", response_model=dict)
-async def get_meter(meter_id: str) -> Dict[str, Any]:
+@app.get(
+    "/api/meters/{meter_id}",
+    response_model=MeterRecord,
+    responses={
+        404: {"model": APIErrorResponse},
+        500: {"model": InternalErrorResponse},
+    },
+)
+async def get_meter(meter_id: str) -> dict:
     """Retrieve a single meter's full metadata record.
 
     Returns a 404 response if the meterId does not exist in the dataset.
@@ -822,12 +1138,13 @@ async def get_meter(meter_id: str) -> Dict[str, Any]:
     record = _by_id.get(meter_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Meter not found")
-    return _full_record(record)
+    return dict(record)
 
 
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
@@ -839,8 +1156,8 @@ async def http_exception_handler(request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc: Exception):
-    # In production one would log `exc` securely. Here we return a generic
-    # 500 with a minimal message so no secrets leak in the response.
+    # Log the real error server-side without exposing internals to the client.
+    logger.exception("Unhandled exception on %s", request.url.path)
     return JSONResponse(
         status_code=500,
         content={"error": "internal_server_error", "message": "An unexpected error occurred"},

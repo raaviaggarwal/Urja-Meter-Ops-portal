@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 import json
 import sys
-sys.path.insert(0, '.')
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 from app import app
 
-# Generate OpenAPI schema
 schema = app.openapi()
+output_path = ROOT / "openapi.json"
 
-# Write to file
-with open('openapi.json', 'w') as f:
-    json.dump(schema, f, indent=2)
+output_path.write_text(
+    json.dumps(schema, indent=2, ensure_ascii=False) + "\n",
+    encoding="utf-8",
+)
 
-print(f'openapi.json generated: {len(schema)} routes')
-print(f'Routes in schema: {len(schema.get("paths", {}))} path items')
-
-# List all paths
 paths = schema.get('paths', {})
+operation_count = sum(len(methods) for methods in paths.values())
+print(f'openapi.json generated: {len(paths)} paths, {operation_count} operations')
+
 for path, methods in sorted(paths.items(), key=lambda x: x[0]):
     methods_str = ', '.join(methods.keys()) if methods else 'unknown'
     print(f'  {methods_str:15} {path}')

@@ -1,10 +1,60 @@
 """Automated tests for the Fluck Energy Meter API."""
 
 import json
-import pytest
+
+# FIX TestClient compatibility with starlette 0.36.3 + httpx 0.28.1
+# BEFORE importing TestClient, apply the monkey-patch
+import sys
+
+from starlette.testclient import TestClient as _OrigTestClient
+
+_orig_init = _OrigTestClient.__init__
+
+def _patched_init(self, app, base_url="http://testserver", **kwargs):
+    """Patched init that handles the 'app' parameter incompatibility."""
+    try:
+        _orig_init(self, app, base_url=base_url, **kwargs)
+    except TypeError as e:
+        if "unexpected keyword argument 'app'" in str(e):
+            # Manually set up TestClient without passing app to super
+            self.app = app
+            self.app_state = {}
+            self.raise_server_exceptions = kwargs.get('raise_server_exceptions', True)
+            self.base_url = base_url
+            self.follow_redirects = kwargs.get('follow_redirects', True)
+            self.cookies = kwargs.get('cookies')
+            self.headers = {'user-agent': 'testclient'}
+            
+            from starlette.testclient import _TestClientTransport
+            root_path = kwargs.get('root_path', '')
+            self.transport = _TestClientTransport(
+                self.app,
+                portal_factory=self._portal_factory,
+                raise_server_exceptions=self.raise_server_exceptions,
+                root_path=root_path,
+                app_state=self.app_state,
+            )
+            
+            # Initialize httpx.Client attributes manually
+            self._params = {}
+            self._cookies = self.cookies or {}
+            self._headers = self.headers
+            self.base_url = base_url  # This might need to be a URL object
+            self._raise_server_exceptions = self.raise_server_exceptions
+            self._follow_redirects = self.follow_redirects
+        else:
+            raise
+    else:
+        pass
+
+_OrigTestClient.__init__ = _patched_init
+
+# Now import TestClient (which is already patched)
 from fastapi.testclient import TestClient
+
 from app import app, dataset, TOTAL_RECORDS
 
+# Module-level test client (will use patched init)
 client = TestClient(app)
 
 
@@ -149,17 +199,5 @@ class TestExport:
 
 class TestMissingMeter:
     def test_nonexistent_meter_returns_404(self):
-        response = client.get("/api/meters/ absolutely-nonexistent")
+        response = client.get("/api/meters/absolutely-nonexistent")
         assert response.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Helper: module-level setup (import-time) so TOTAL_RECORDS is available
-# ---------------------------------------------------------------------------
-# The tests import `dataset` and `TOTAL_RECORDS` from `app`; those are populated
-# at module load time by the `load_dataset()` call at the top of `app.py`.
-# If the dataset file is missing, the app will still start but TOTAL_RECORDS
-# will be 0 and dataset []. The tests will still run (just with empty data).
-# ---------------------------------------------------------------------------
-
-# Run these with: pytest tests.py -v

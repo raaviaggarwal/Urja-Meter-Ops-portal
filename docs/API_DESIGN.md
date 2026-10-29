@@ -6,6 +6,9 @@
 > or implemented. The current evidence-qualified portal observations are in
 > [docs/PROTOCOL.md](PROTOCOL.md); the local API implementation is described
 > in [README.md](../README.md).
+>
+> Identifiers, serials, coordinates, and location names in examples are
+> illustrative placeholders, not portal or export records.
 
 ## 1. Requirements Summary
 
@@ -41,8 +44,8 @@ Each meter record has these top-level fields and types:
 
 | Field | Type | Description |
 |---|---|---|
-| `meterId` | string | Unique meter identifier (e.g., "J100000") |
-| `serialNo` | string | Meter serial number (e.g., "SE33962") |
+| `meterId` | string | Unique meter identifier (e.g., "EXAMPLE-METER-ID") |
+| `serialNo` | string | Meter serial number (e.g., "EXAMPLE-SERIAL") |
 | `make` | string | Manufacturer (HPL, L&T, Genus, Secure, Allied) |
 | `phaseType` | string | "single" or "three" |
 | `installStatus` | string | "Installed", "Faulty", "Decommissioned" |
@@ -152,7 +155,7 @@ All error responses include `error` (class), `message` (human-readable), and opt
 
 This avoids scanning all 403 records on every request.
 
-**Search algorithm:** Substring match on `meterId` and `serialNo` fields. Since the dataset uses sequential IDs (J100000-J100043 approximately), exact or prefix matching is efficient.
+**Search algorithm:** Substring match on `meterId` and `serialNo` fields. Exact or prefix matching can be used for identifier searches.
 
 **Pagination:** Standard offset-based: `page` and `per_page`. Total count returned in header or body for client-side page calculation.
 
@@ -249,8 +252,8 @@ The portal has a `/(portal)/transformers` route, but detailed field data is not 
 **Meter summary object** (subset of full record, lightweight for listing):
 ```json
 {
-  "meterId": "J100000",
-  "serialNo": "SE33962",
+  "meterId": "EXAMPLE-METER-ID",
+  "serialNo": "EXAMPLE-SERIAL",
   "make": "HPL",
   "phaseType": "single",
   "installStatus": "Decommissioned",
@@ -259,7 +262,7 @@ The portal has a `/(portal)/transformers` route, but detailed field data is not 
     "zone": { "name": "Jaipur Zone 1", "code": "Z-01" },
     "dt": { "name": "Malviya Nagar DT 1", "code": "DT-001" }
   },
-  "geo": { "lat": 26.938961, "lng": 75.830957 }
+  "geo": { "lat": 0.0, "lng": 0.0 }
 }
 ```
 
@@ -271,8 +274,8 @@ The portal has a `/(portal)/transformers` route, but detailed field data is not 
 Full meter record as in `meter-export.json`:
 ```json
 {
-  "meterId": "J100000",
-  "serialNo": "SE33962",
+  "meterId": "EXAMPLE-METER-ID",
+  "serialNo": "EXAMPLE-SERIAL",
   "make": "HPL",
   "phaseType": "single",
   "installStatus": "Decommissioned",
@@ -288,7 +291,7 @@ Full meter record as in `meter-export.json`:
     "feeder": { "name": "Feeder 1", "code": "F-001" },
     "dt": { "name": "Malviya Nagar DT 1", "code": "DT-001" }
   },
-  "geo": { "lat": 26.938961002479868, "lng": 75.83095696146852 }
+  "geo": { "lat": 0.0, "lng": 0.0 }
 }
 ```
 
@@ -306,7 +309,7 @@ Full meter record as in `meter-export.json`:
 {
   "meters": [ /* matching meter summary objects */ ],
   "total": 2,
-  "query": "J10000"
+  "query": "EXAMPLE-METER-ID"
 }
 ```
 
@@ -422,7 +425,7 @@ required.
                               "name": "Malviya Nagar DT 1",
                               "code": "DT-001",
                               "meterCount": 10,
-                              "meterIds": ["J100000", "J100011", ...]
+                              "meterIds": ["EXAMPLE-METER-ID", "EXAMPLE-METER-ID", ...]
                             }
                           }
                         }
@@ -492,7 +495,7 @@ required.
 {
   "meters": [
     {
-      "meterId": "J100000",
+      "meterId": "EXAMPLE-METER-ID",
       "distance_km": 2.345
     }
   ],

@@ -1,22 +1,22 @@
 # Urja Meter Ops — Portal and Export Evidence
 
-This document distinguishes facts measured from the local export and the
-authenticated portal UI from claims reported by earlier investigation notes.
-It does not describe an API integration. No credentials, cookies, or tokens
-are recorded here.
+This document records retained observations from earlier browser sessions,
+local-export measurements, and the Phase 13 browser state. The earlier
+authenticated captures were not repeated during Phase 13. It does not describe
+an API integration. No credentials, cookies, or tokens are recorded here.
 
 ## Evidence classifications
 
-- **Verified by direct observation** — seen in the integrated browser during
-  this audit. UI observations do not establish the underlying HTTP response
-  format or request implementation.
+- **Verified by direct observation** — seen in the shared browser at the
+  stated date and phase. UI observations do not establish the underlying HTTP
+  response format or request implementation.
 - **Verified by captured request/response or existing test** — supported by a
   retained request/response or a reproducible local test.
 - **Inferred but not confirmed** — plausible from the notes or UI, but not
-  established by direct evidence available for this audit.
-- **Unknown** — not established by available evidence. Earlier notes sometimes
-  attribute this gap to lack of portal access; the portal listing was
-  accessible in a prior browser observation.
+  established by direct evidence in the retained evidence set.
+- **Unknown** — not established by available evidence. Earlier authenticated
+  portal observations exist, but the current Phase 13 browser is at `/login`
+  and no fresh authenticated request/response capture was made.
 
 ## 1. Live portal observations
 
@@ -31,12 +31,16 @@ are recorded here.
   browser session. It navigated to `/meters`, where the signed-in Meters page
   rendered. The exact time of this later observation was not captured.
 - **2026-10-28 (Phase 2 investigation):** The shared browser was initially
-  attached to `/meters/J100000`, but navigating to `/meters` ended at the
+  attached to a meter detail page, but navigating to `/meters` ended at the
   sign-in page. The observed navigation chain was `GET /meters` followed by
   `GET /login`; the final `/login` document returned HTTP 200. The status of
   the initial `/meters` response was not captured. This establishes the
   access state during that investigation only; it does not establish why the earlier
   signed-in state was no longer present.
+- **2026-10-28 (Phase 13 check):** The currently shared browser page displays
+  the sign-in form at `/login`. No login was attempted and no fresh
+  authenticated network capture was made. This does not establish session
+  expiry or the cause of the earlier redirect.
 - **Phase 2.1:** After the user manually signed in through the normal browser
   flow, the shared browser displayed the Meters page and an individual meter
   detail page. The sign-in submission itself was not observed. Network
@@ -51,38 +55,38 @@ are recorded here.
 - The page was titled **Meters** and displayed **403 total**.
 - The table showed 20 records on **Page 1 of 21**. Visible columns were
   `METER`, `SERIAL`, `MAKE`, `PHASE`, `STATUS`, and `DT`.
-- Five displayed records were compared with `meter-export.json`. For each of
-  `J100000` through `J100004`, `meterId`, `serialNo`, `make`, `phaseType`,
-  `installStatus`, and `dtCode` matched the local export exactly.
+- Five displayed records were compared with `meter-export.json`. For all five,
+  `meterId`, `serialNo`, `make`, `phaseType`, `installStatus`, and `dtCode`
+  matched the local export exactly.
 - This comparison verifies those displayed fields for those five records
   only. It does not validate other fields or prove that the local export and
   portal remain globally identical.
 
-The current observed UI total is **403**, matching the local export. Earlier
-notes reporting 405 portal meters are stale or inconsistent with this later
-observation; the cause of the earlier count is not established.
+The latest retained UI observation recorded **403**, matching the local
+export measurement. Earlier notes reporting 405 portal meters conflict with
+that observation; the cause of the historical count is not established.
 
 The page visibly exposes navigation to Meters, Transformers, Ops Desk, and
-Sign out. The Transformers page contents were not examined in this audit.
+Sign out. The Transformers page contents were not examined in Phase 2.1.
 
 **Verified by direct observation during Phase 2.1:** The listing search box
-accepted `J100000` and displayed one matching row. Clicking Next changed the
+accepted a meter-ID query and displayed one matching row. Clicking Next changed the
 displayed page while the browser remained at `/meters`.
 
 ## 2. Authentication and session behavior
 
-**Verified by direct observation:** The sign-in page at `/login` displayed
-Email and Password inputs. The form's declared method is POST, action is
-`/login`, and encoding is `application/x-www-form-urlencoded`; its input names
-are `email` and `password`. These are form attributes, not a captured
-submission. In the earlier signed-in listing observation, the page displayed
-a Sign out control.
+**Verified by direct observation in earlier browser sessions:** The sign-in
+page at `/login` displayed Email and Password inputs. The form's declared
+method is POST, action is `/login`, and encoding is
+`application/x-www-form-urlencoded`; its input names are `email` and
+`password`. These are form attributes, not a captured submission. In an
+earlier signed-in listing observation, the page displayed a Sign out control.
 
-**Reported by earlier investigation notes, not independently verified in this
-audit:** Those notes describe a failed-login JSON response and requests
+**Reported by earlier investigation notes, not supported by a retained
+request/response:** Those notes describe a failed-login JSON response and requests
 involving browser headers. The notes conflict on whether successful login was
 actually achieved and whether a session cookie was observed. No login
-submission was captured in this investigation; the user reported completing
+submission was captured in Phase 2.1; the user reported completing
 sign-in manually. No login request/response was captured to resolve those
 conflicts.
 
@@ -104,10 +108,10 @@ non-sensitive structure):
 | `GET /portal/meters/search?q=&page=1` | 200 OK, `application/json`, Content-Length `2539` | JSON top-level `data` array; visible record fields include `meterId`, `serialNo`, `make`, `phaseType`, `installStatus`, and `dtCode`. |
 | `GET /portal/meters/search?q=&page=2` | 200 OK, `application/json`, Content-Length `2518` | JSON top-level `data` array; visible record fields include `meterId`, `serialNo`, `make`, `phaseType`, `installStatus`, and `dtCode`. |
 | `GET /portal/meters/search?q=&page=4` | 200, `application/json` | 20 records were returned; visible record fields include `meterId`, `serialNo`, `make`, `phaseType`, `installStatus`, and `dtCode`. Response pagination fields have not been verified. |
-| `GET /portal/meters/search?q=J100000&page=1` | 200 OK; approximately `0.2 kB` transferred in the DevTools capture | The UI displayed one matching record and “Page 1 of 1”: meter ID `J100000`, serial `SE33962`, make `HPL`, phase `single`, status `Decommissioned`, DT code `DT-001`. The response body schema was not verified from this capture. |
-| `GET /meters/J100000/__data.json` | 200, `application/json` | SvelteKit page-data response; top-level keys observed: `type`, `nodes`. |
-| `GET /portal/meters/J100000/geo` | 200 OK, `application/json`, Content-Length `74` bytes | Response shape: `{"data":{"latitude":26.938961002479868,"longitude":75.83095696146852}}`. |
-| `GET /portal/meters/J100000/energy` | 200 OK, `application/json`, Content-Length `27557` bytes | Top-level `data` array; each visible entry includes `timestamp`, `kwh`, `kvah`, and `voltR`. Example visible entry: `23/06/2026 23:30`, `48438.74`, `52313.84`, `226`, respectively. |
+| `GET /portal/meters/search?q=<redacted>&page=1` | 200 OK; approximately `0.2 kB` transferred in the DevTools capture | The UI displayed one matching record and “Page 1 of 1”; identifier and summary values omitted. The response body schema was not verified from this capture. |
+| `GET /meters/{meterId}/__data.json` | 200, `application/json` | SvelteKit page-data response; top-level keys observed: `type`, `nodes`. |
+| `GET /portal/meters/{meterId}/geo` | 200 OK, `application/json`, Content-Length `74` bytes | Object with numeric `data.latitude` and `data.longitude` fields; values omitted. |
+| `GET /portal/meters/{meterId}/energy` | 200 OK, `application/json`, Content-Length `27557` bytes | Top-level `data` array; entries expose `timestamp`, `kwh`, `kvah`, and `voltR`; sample values omitted. |
 
 **Chrome DevTools capture:** In both page 1 and page 2 requests, `q` was empty
 and `page` was the requested page number. After navigating to page 2, the UI
@@ -116,14 +120,14 @@ fields in these two DevTools captures have not yet been inspected; the
 Content-Length values above do not establish record totals or page metadata.
 
 Separately, a captured page 4 response contained 20 records. The DevTools
-search capture shows that searching for `J100000` issued
-`q=J100000&page=1`; the UI then displayed the single matching record listed
+search capture shows that a meter-ID search issued
+`q=<redacted>&page=1`; the UI then displayed the single matching record listed
 above. These observations establish this specific query and page navigation
 behavior for the session; they do not establish status filtering,
 search-by-serial behavior, or a response pagination schema.
 
-The geography and energy observations above are from the `J100000` detail page
-only; they do not establish that other meter IDs behave identically. No units
+The geography and energy observations above are from one meter detail page
+only; they do not establish that other meters behave identically. No units
 or timestamp timezone are inferred from the energy values. The meter detail
 page was rendered as an HTML document in the browser
 (`document.contentType` was `text/html`); its document response content-type
@@ -150,7 +154,7 @@ from an assumed live API:
 - **403 unique, non-null meter IDs**
 - **No missing or blank IDs**
 - **No duplicate IDs**
-- IDs span **J100000–J100402**, with no gaps in that range
+- IDs form a contiguous sequence with no gaps; endpoint values are omitted
 - **No missing or invalid coordinates:** every record has numeric latitude
   and longitude within valid geographic ranges
 - Status counts: Installed **238**, Faulty **90**, Decommissioned **75**
@@ -167,9 +171,8 @@ and `geo`. The export hierarchy has `zone`, `circle`, `division`,
 describe the local file; they do not establish that the portal exposes the
 same full record schema.
 
-No separate evidence available in this audit establishes the export button's
-request path or whether the local file was produced by the portal's current
-export behavior.
+No retained evidence establishes the export button's request path or whether
+the local file was produced by the portal's current export behavior.
 
 ## 5. Pagination, filtering, and rate limits
 
@@ -178,8 +181,8 @@ export behavior.
   `page=2` request with an empty `q`; the UI then showed Page 2 of 21 and
   different rows. The corresponding DevTools JSON pagination fields remain
   uninspected.
-- **Verified by captured request and UI observation:** Searching for
-  `J100000` used `GET /portal/meters/search?q=J100000&page=1`; the UI showed
+- **Verified by captured request and UI observation:** Searching for a meter ID
+  used `GET /portal/meters/search?q=<redacted>&page=1`; the UI showed
   one matching record and “Page 1 of 1”. The response pagination fields have
   not been inspected.
 - **Unknown:** Search by serial number, status/filter controls and parameters,
@@ -191,23 +194,23 @@ export behavior.
 | Claim | Classification | Evidence and limitation |
 |---|---|---|
 | Local export has 403 records and 403 unique IDs | Verified by direct observation | `meter-export.json`; counts and uniqueness were recalculated |
-| IDs are contiguous from J100000 to J100402 | Verified by direct observation | Full numeric interval checked; no gaps |
+| IDs form a contiguous sequence with no gaps | Verified by direct observation | The full numeric interval was checked; endpoint values omitted |
 | Export coordinates are present and valid | Verified by direct observation | All 403 records checked for numeric latitude/longitude ranges |
 | Portal listing showed 403 records and 20 rows on page 1 of 21 | Verified by direct observation | Authenticated browser UI on 2026-10-28 |
-| Five portal rows match export values for six visible fields | Verified by direct observation and local comparison | J100000–J100004; no claim about unobserved fields |
+| Five portal rows match export values for six visible fields | Verified by direct observation and local comparison | Five sample rows; no claim about unobserved fields |
 | `/meters` showed 502 | Verified by direct observation | Browser event timestamp 2026-10-27 18:34:42.633 UTC |
 | Base URL later led to a rendered meter listing | Verified by direct observation | Same shared browser session; 2026-10-28 |
 | Phase 2 navigation to `/meters` ended at `/login`, final document 200 | Verified by browser navigation | Initial response status was not captured; the user later manually signed in for Phase 2.1 |
 | Authenticated listing and meter detail pages were accessible after the user manually signed in | Verified by direct observation | Phase 2.1; login submission was not captured |
-| Listing search and pagination use `/portal/meters/search` with JSON responses | Verified by captured request/response | Search `q=J100000&page=1`; page request `q=&page=4`; captures summarized in section 3 |
-| Meter geography and energy data use the observed `/portal/meters/J100000/geo` and `/energy` requests | Verified by captured request/response | Both returned HTTP 200 `application/json`; one meter only |
+| Listing search and pagination use `/portal/meters/search` with JSON responses | Verified by captured request/response | Search `q=<redacted>&page=1`; page request `q=&page=4`; captures summarized in section 3 |
+| Meter geography and energy data use the observed `/portal/meters/{meterId}/geo` and `/energy` requests | Verified by captured request/response | Both returned HTTP 200 `application/json`; one meter only |
 | Login form declares POST `/login` with form encoding and `email`/`password` input names | Verified by direct observation of form attributes | No form submission or request body observed |
-| Login is form-based and its failure response has a particular JSON shape | Inferred but not confirmed in this audit | Described in earlier notes; no request/response capture available here |
+| Login is form-based and its failure response has a particular JSON shape | Inferred but not confirmed | Described in earlier notes; no request/response capture is available |
 | A successful login sets a session cookie | Inferred but not confirmed | No login response or authentication material was inspected |
 | Session expiration behavior | Unknown | Not observed or tested |
 | Status filtering and search by serial number | Unknown | Not exercised in Phase 2.1 |
 | Transformer data requests and response fields | Unknown | Transformers page not inspected |
-| 405 portal records | Not supported by the current observation | Earlier notes report 405; current listing reports 403 |
+| 405 portal records | Not supported by the latest retained observation | Earlier notes report 405; the retained listing observation reports 403 |
 
 ## 7. Earlier investigation notes and limitations
 
@@ -236,8 +239,9 @@ recorded.
 
 ## 8. Checks still required
 
-The authorized browser now displays the listing and a meter detail page. The
-following protocol details remain unverified:
+The Phase 13 shared browser currently displays `/login`; no fresh
+authenticated captures were made. The following protocol details remain
+unverified:
 
 1. To verify the login flow, capture the request and response during a future
    user-performed normal sign-in, without recording credentials or session

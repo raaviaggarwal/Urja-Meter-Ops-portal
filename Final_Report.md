@@ -76,7 +76,7 @@ reported 405, but the cause of that discrepancy is unknown and the earlier
 count is not treated as verified. See [docs/PROTOCOL.md](docs/PROTOCOL.md)
 for the scoped browser captures and export measurements.
 
-Portal meter-list search, pagination, and `J100000` geography/energy requests
+Portal meter-list search, pagination, and `EXAMPLE-METER-ID` geography/energy requests
 were observed in the authorized browser. The login submission, authentication
 mechanism, session expiry, transformer data requests, and several other
 portal behaviors remain unverified. These observations do not make this

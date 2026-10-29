@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+import sys
+print(f'Python: {sys.version}')
+import starlette
+print(f'starlette: {starlette.__version__}')
+import fastapi
+print(f'fastapi: {fastapi.__version__}')
+import httpx
+print(f'httpx: {httpx.__version__}')

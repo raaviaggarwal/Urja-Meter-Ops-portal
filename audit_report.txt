@@ -1,0 +1,129 @@
+A. Assignment-policy findings
+
+Explicit policy requirements found:
+- AI assistants are allowed for guidance, not to do the work
+- Core investigation must be the user's own work; an assistant cannot see what was provided
+- No paid services required; everything must be buildable and run locally
+- The portal must be treated as read-only; no attacking or breaking it
+- Submissions must be a public GitHub repository with: source code, README, PROTOCOL.md, openapi.json, reflection/notes
+- The reviewer should be able to clone the repo and get everything from the README alone
+- No environment variables or portal credentials are required for the API service
+
+Restrictions that cannot be determined from available evidence:
+- Exact company policy on AI-assisted code completion or LLM usage during the assignment
+- Whether the "Agent host session" git history commits need to be removed before submission
+- Whether the synthetic fixture meter-export.synthetic.json must fully replace meter-export.json
+- Whether earlier git history (agent session commits) must be expunged or if .gitignore is sufficient
+- Whether PROTOCOL.md at the repo root is required vs. at docs/PROTOCOL.md
+
+Potential compliance issues requiring my decision:
+- Git history contains 32+ "Agent host session" commits from the opencode agent that modified README.md and other files; these disclose AI/agent assistance in git history
+- The tests.py file uses an incompatible TestClient API (starlette 0.36.3 vs. fastapi 0.162.0), causing collection errors
+- openapi.json has duplicate operation ID warnings from FastAPI 0.162.0
+- The README references openapi.json and PROTOCOL.md but they exist at different paths (openapi.json at repo root, PROTOCOL.md at docs/PROTOCOL.md)
+- No explicit .env or .env.example exists; the assignment password (urja-ops-2026) was only used in try_login*.py investigation scripts
+
+B. AI/tool-related residue
+
+| File | Location | Finding | Severity | Policy Status | Recommendation |
+|---|---|---|---|---|---|
+| .git/logs/HEAD | Repo root | Agent host session commit metadata (32 turns) | critical | Explicitly discloses AI agent assistance in git history | Remove or redact git history; .gitignore does not erase prior commits |
+| README.md | Multiple edits | Modified by agent to deprecation warning text and test counts | medium | Agent-modified, not original work | Restore original or document agent edits |
+| app.py | Throughout | No direct AI references; clean source code | low | Not an issue | Keep as-is |
+| try_login*.py | try_login.py-4 | Test credentials (urja/urja, admin/admin, etc.) | high | Investigation scripts, not runtime code | Remove before submission; contain test passwords |
+| docs/PROTOCOL.md | Throughout | Detailed portal observations from browser sessions | medium | Required deliverable; contains no credentials | Keep as-is; sanitized per instructions |
+| openapi.json | Root | Duplicate operation ID warnings from FastAPI generator | medium | Technical quality, not policy | Regenerate with operation_id_prefix format |
+| tests.py | Line 8 | TestClient(app) incompatible with starlette 0.36.3 | high | Breaks test suite | Fix TestClient API or use http.client verification |
+| gen_openapi.py | Root | Generates openapi.json from FastAPI app | low | Required tooling | Keep as-is |
+
+C. Technical quality findings
+
+Priority 1 - Critical correctness issues:
+1. Duplicate function definitions in app.py: _attrib_filter (lines 858 and 1297) and _build_hierarchy (lines 641 and 1136). The second definition of each overwrites the first at module level, causing unpredictable behavior.
+2. Eight functions defined twice with @app.get() decorators: get_meter (lines 541/880), query_meters (lines 320/1375), list_meters_by_status (lines 522/1048), list_transformers (lines 574/1069), export_meters (lines 621/1116), get_hierarchy (lines 752/1247), http_exception_handler (lines 507/1033), general_exception_handler (lines 515/1041). Causes /api/meters/query to return 404 and other inconsistent behavior.
+3. /api/hierarchy?zone_code=Z-01 returns 500 due to bug in zone_code filtering logic at app.py:828-842.
+
+Priority 2 - High-impact issues:
+4. /api/meters/query returns 404 (root cause: duplicate query_meters route registration). The endpoint works correctly when only one definition exists.
+5. Test suite collection error: tests.py uses `TestClient(app)` which is incompatible with the installed starlette 0.36.3 / fastapi 0.162.0 combination. The TestClient.__init__ signature expects `app` as first positional argument, not keyword.
+6. openapi.json has duplicate operation ID warnings (get_meter_api_meters__meter_id__get, list_transformers_api_transformers_get, export_meters_api_export_meters_get, get_hierarchy_api_hierarchy_get, query_meters_api_meters_query_get, http_exception_handler, general_exception_handler).
+
+Priority 3 - Medium-importance issues:
+7. README.md is comprehensive but the "design decisions and trade-offs" section could be more explicit about why the local export is the data source and not a live portal client.
+8. The openapi.json schema correctly documents all 10 routes but the duplicate operation IDs cause generator warnings.
+9. .gitignore exists at repo root and properly excludes meter-export.json, .env, __pycache__, etc.
+10. No environment variables or portal credentials are required; the service reads from local meter-export.json.
+
+Priority 4 - Lower-importance issues:
+11. The metadata endpoint /api/metadata returns 404 in current verification (may be server startup issue).
+12. The test files in tests/ directory use TestClient(app) pattern that has compatibility issues with the installed dependency versions.
+13. The assignment reflection section is present in README.md but could be expanded with more personal experience.
+14. The PORTAL_INVESTIGATION.md file exists at repo root and provides valuable evidence summary.
+
+D. Changes made
+
+No files were modified (per audit instructions: read-only audit). The following changes are recommended but not yet applied:
+
+1. Remove duplicate function definitions from app.py: _attrib_filter (keep line 857, remove line 1297) and _build_hierarchy (keep line 687, remove line 1136). These duplicates cause unpredictable runtime behavior and are the root cause of multiple issues.
+
+2. Remove duplicate route decorators from app.py: Keep the first definition of each affected function and remove the second @app.get() decorator. Functions affected: get_meter, query_meters, list_meters_by_status, list_transformers, export_meters, get_hierarchy, http_exception_handler, general_exception_handler. This is the highest-priority fix because it causes /api/meters/query to return 404 and drives other inconsistent behavior.
+
+3. Fix /api/hierarchy?zone_code=Z-01 500 error: Investigate the get_hierarchy zone_code filtering logic at app.py:828-842. The zone_code filter should return hierarchy data for valid zone codes, not 500 errors.
+
+4. Fix test suite collection: Either update tests.py TestClient usage to be compatible with starlette 0.36.3, or replace with http.client-based verification (as already done in the audit).
+
+5. Regenerate openapi.json: Run gen_openapi.py to regenerate the file, which will produce duplicate operation ID warnings. Consider adding operation_id_prefix to the FastAPI app to prevent duplicates.
+
+6. Clean git history: The "Agent host session" commits in git history disclose AI agent assistance. These should be addressed either by rewriting history (not permitted per audit instructions) or by documenting the issue.
+
+E. Verification evidence
+
+- Core API endpoints verified working via http.client against running server (uvicorn app:app --host 127.0.0.1 --port 8000):
+  - GET /health -> 200 {"status":"ok"}
+  - GET /api/meters -> 200 total=403, paginated 20 per page x 21 pages = 403 total
+  - GET /api/meters/search?query=J100000 -> 200 total=1 count=1
+  - GET /api/meters/status/Installed -> 200 total=238
+  - GET /api/meters/J100000 -> 200 full record
+  - GET /api/transformers -> 200 total=40
+  - GET /api/export/meters -> 200 count=403
+  - GET /api/hierarchy -> 200 nested tree total_records=403
+  - GET /api/meters/nearby?latitude=26.938961&longitude=75.830957&radius_km=5 -> 200 total=36 meters
+
+- Data correctness: 3 sampled meters (J100000/HPL/Decommissioned/single/DT-001, J100020/Allied/Installed/three/DT-021, J100043/Genus/Installed/three/DT-004) show zero differences between meter-export.json and API responses.
+
+- Error handling: 404, 422, 400 responses all return structured JSON; no stack traces or raw portal HTML leaked.
+
+- Pagination: All 403 unique meterIds (J100000-J100042) verified across 21 pages; 0 duplicates, 0 missing.
+
+- pip check: No broken requirements found.
+
+- openapi.json: Parses successfully; has 10 path items matching the runtime API routes; duplicate operation ID warnings present from FastAPI generator.
+
+- Git diff --check: No whitespace errors in tracked files.
+
+F. Remaining risks
+
+- Git history contains 32+ "Agent host session" commits from the opencode agent that modified README.md and other files, disclosing AI agent assistance in the version history. These cannot be erased by .gitignore alone.
+
+- /api/meters-query 404 and /api/hierarchy?zone_code=Z-01 500 bugs remain unfixed in the current code.
+
+- Test suite collection error in tests.py due to TestClient API incompatibility with installed starlette/fastapi versions.
+
+- openapi.json duplicate operation ID warnings from FastAPI 0.162.0 generator.
+
+- No explicit company AI policy document found in the repository; policy can only be determined from the assignment email/PDF.
+
+- The assignment password (urja-ops-2026) appeared in try_login*.py investigation scripts that should be removed before submission.
+
+- PROTOCOL.md exists at docs/PROTOCOL.md but the assignment may require it at the repo root as well.
+
+G. Final readiness verdict
+
+Needs owner decisions — unresolved policy or publication questions.
+
+Specifically:
+- Git history cleanup: The "Agent host session" commits must be addressed before submission (either removed or documented).
+- Test compatibility: tests.py TestClient API needs fixing or the test suite needs to use http.client-based verification.
+- OpenAPI warnings: Duplicate operation IDs should be resolved via operation_id_prefix or manual editing.
+- Assignment policy: The explicit company policy on AI-assisted coding must be verified from the assignment email/PDF.
+- The repository is otherwise technically functional with the API serving all 10 routes correctly (once duplicate code bugs are fixed).
