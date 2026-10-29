@@ -1,7 +1,10 @@
 """Maintained API route tests migrated from the obsolete tests.py script."""
 
+import math
+
 from fastapi.testclient import TestClient
 
+import app as app_module
 from app import TOTAL_RECORDS, app, dataset
 
 client = TestClient(app)
@@ -141,6 +144,114 @@ def test_export_meters() -> None:
     assert "meters" in body
     assert body["count"] == TOTAL_RECORDS
     assert len(body["meters"]) == TOTAL_RECORDS
+
+
+def test_nearby_meters_calculates_distance_and_applies_radius(
+    monkeypatch,
+) -> None:
+    origin = {**dataset[0], "geo": {"lat": 0.0, "lng": 0.0}}
+    nearby = {**dataset[1], "geo": {"lat": 0.0, "lng": 0.01}}
+    outside = {**dataset[2], "geo": {"lat": 0.0, "lng": 0.1}}
+    monkeypatch.setattr(app_module, "dataset", [origin, nearby, outside])
+
+    response = client.get(
+        "/api/meters/nearby",
+        params={"latitude": 0, "longitude": 0, "radius_km": 1.2},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [meter["meterId"] for meter in body["meters"]] == [
+        origin["meterId"],
+        nearby["meterId"],
+    ]
+    assert body["meters"][0]["distance_km"] == 0
+    expected_distance = 6371 * math.radians(0.01)
+    assert body["meters"][1]["distance_km"] == round(expected_distance, 4)
+
+
+def test_hierarchy_reconstructs_and_filters_synthetic_records() -> None:
+    record = dataset[0]
+    hierarchy = record["hierarchy"]
+
+    response = client.get("/api/hierarchy")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_records"] == len(dataset)
+    zone = body["zones"][hierarchy["zone"]["name"]]
+    circle = zone["circles"][hierarchy["circle"]["name"]]
+    division = circle["divisions"][hierarchy["division"]["name"]]
+    subdivision = division["subdivisions"][hierarchy["subdivision"]["name"]]
+    substation = subdivision["substations"][hierarchy["substation"]["name"]]
+    feeder = substation["feeders"][hierarchy["feeder"]["name"]]
+    transformer = feeder["dts"][hierarchy["dt"]["name"]]
+    path_levels = (
+        "zone",
+        "circle",
+        "division",
+        "subdivision",
+        "substation",
+        "feeder",
+        "dt",
+    )
+    expected_meter_ids = [
+        item["meterId"]
+        for item in dataset
+        if all(
+            item["hierarchy"][level]["code"] == hierarchy[level]["code"]
+            for level in path_levels
+        )
+    ]
+    assert transformer["code"] == hierarchy["dt"]["code"]
+    assert transformer["meterCount"] == len(expected_meter_ids)
+    assert transformer["meterIds"] == expected_meter_ids[:20]
+
+    filtered_response = client.get(
+        "/api/hierarchy",
+        params={"zone_code": hierarchy["zone"]["code"]},
+    )
+
+    assert filtered_response.status_code == 200
+    filtered_body = filtered_response.json()
+    assert filtered_body["total_records"] == len(dataset)
+    assert list(filtered_body["zones"]) == [hierarchy["zone"]["name"]]
+
+
+def test_query_meters_combines_synthetic_filters_with_and() -> None:
+    sample = dataset[0]
+    hierarchy = sample["hierarchy"]
+    params = {
+        "status": sample["installStatus"],
+        "make": sample["make"],
+        "phase_type": sample["phaseType"],
+        "install_type": sample["installType"],
+        "dt_code": sample["dtCode"],
+        "zone_code": hierarchy["zone"]["code"],
+        "circle_code": hierarchy["circle"]["code"],
+        "feeder_code": hierarchy["feeder"]["code"],
+        "per_page": 100,
+    }
+    expected_ids = {
+        record["meterId"]
+        for record in dataset
+        if record["installStatus"] == params["status"]
+        and record["make"] == params["make"]
+        and record["phaseType"] == params["phase_type"]
+        and record["installType"] == params["install_type"]
+        and record["dtCode"] == params["dt_code"]
+        and record["hierarchy"]["zone"]["code"] == params["zone_code"]
+        and record["hierarchy"]["circle"]["code"] == params["circle_code"]
+        and record["hierarchy"]["feeder"]["code"] == params["feeder_code"]
+    }
+
+    response = client.get("/api/meters/query", params=params)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == len(expected_ids)
+    assert {record["meterId"] for record in body["meters"]} == expected_ids
+    assert body["total_pages"] == 1
 
 
 def test_nonexistent_meter_returns_404() -> None:

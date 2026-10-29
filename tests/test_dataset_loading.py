@@ -127,3 +127,32 @@ def test_metadata_reports_loaded_snapshot_timestamp(
 
     assert response.status_code == 200
     assert response.json()["file_modification_time"] == original_timestamp
+
+
+def test_metadata_returns_service_unavailable_when_dataset_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "_dataset_load_error",
+        "Dataset file not accessible (FileNotFoundError)",
+    )
+    monkeypatch.setattr(app_module, "DATASET_FILE_MTIME", None)
+
+    response = TestClient(app_module.app).get("/api/metadata")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": (
+            "Meter dataset is unavailable; provide a valid "
+            "meter-export.json and restart the service"
+        ),
+        "message": (
+            "Meter dataset is unavailable; provide a valid "
+            "meter-export.json and restart the service"
+        ),
+        "detail": (
+            "Meter dataset is unavailable; provide a valid "
+            "meter-export.json and restart the service"
+        ),
+    }

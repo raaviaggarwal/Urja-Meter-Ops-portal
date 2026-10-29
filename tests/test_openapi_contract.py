@@ -35,6 +35,14 @@ def test_openapi_documents_bounds_and_runtime_error_responses() -> None:
         response = schema["paths"][path]["get"]["responses"]["404"]
         assert response["content"]["application/json"]["schema"]["$ref"] == api_error
 
+    metadata_unavailable = schema["paths"]["/api/metadata"]["get"]["responses"][
+        "503"
+    ]
+    assert (
+        metadata_unavailable["content"]["application/json"]["schema"]["$ref"]
+        == api_error
+    )
+
     for path_items in schema["paths"].values():
         for operation in path_items.values():
             assert "500" in operation["responses"]

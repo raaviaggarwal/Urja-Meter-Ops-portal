@@ -619,7 +619,7 @@ async def list_transformers() -> dict:
     substation, and feeder codes/names as observed in the data.
 
     The response format is intentionally lightweight — it reflects what
-    can be derived from the 403-record export without making assumptions
+    can be derived from the loaded dataset without making assumptions
     about fields that are not present.
     """
     # Collect unique DT entries
@@ -666,12 +666,9 @@ async def list_transformers() -> dict:
     },
 )
 async def export_meters() -> dict:
-    """Return the verified meter dataset.
+    """Return the records from the loaded local dataset.
 
-    This endpoint returns the 403-record export that lives alongside the
-    API code. It documents the known discrepancy with the portal UI (405
-    meters displayed vs. 403 records exported) without inventing the
-    missing records or their reason.
+    This endpoint does not retrieve or refresh data from the portal.
     """
     return {
         "count": TOTAL_RECORDS,
@@ -688,6 +685,7 @@ async def export_meters() -> dict:
     "/api/metadata",
     response_model=MeterDatasetMetadata,
     responses={
+        503: {"model": APIErrorResponse},
         500: {"model": InternalErrorResponse},
     },
 )
@@ -704,13 +702,18 @@ async def get_metadata() -> dict:
     provide real-time data. All data comes from the static export
     file meter-export.json alongside the API code.
     """
+    if _dataset_load_error is not None or DATASET_FILE_MTIME is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Meter dataset is unavailable; provide a valid "
+                "meter-export.json and restart the service"
+            ),
+        )
+
     import datetime
 
-    mtime_iso: Optional[str]
-    if DATASET_FILE_MTIME is not None:
-        mtime_iso = datetime.datetime.fromtimestamp(DATASET_FILE_MTIME).isoformat()
-    else:
-        mtime_iso = None
+    mtime_iso = datetime.datetime.fromtimestamp(DATASET_FILE_MTIME).isoformat()
 
     return {
         "record_count": TOTAL_RECORDS,
@@ -926,7 +929,7 @@ async def get_hierarchy(
 
     Response format:
     - zones: dict of zone_name → {code, circles: dict}
-    - total_records: total meters in the dataset (403)
+    - total_records: total meters in the loaded dataset
     """
     if zone_code:
         zones = _hierarchy_cache.get("zones", {})

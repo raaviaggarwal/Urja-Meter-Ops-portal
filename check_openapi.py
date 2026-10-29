@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-with open('openapi.json', 'r') as f:
+with open('openapi.json', 'r', encoding='utf-8') as f:
     data = json.load(f)
 print('Paths:')
 for path, methods in data.get('paths', {}).items():

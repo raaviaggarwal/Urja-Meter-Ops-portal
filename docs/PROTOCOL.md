@@ -4,6 +4,9 @@ This document records retained observations from earlier browser sessions,
 local-export measurements, and the Phase 13 browser state. The earlier
 authenticated captures were not repeated during Phase 13. It does not describe
 an API integration. No credentials, cookies, or tokens are recorded here.
+The local-export measurements below are retained results from the earlier
+investigation; the real export is absent from the current worktree and was not
+re-read during the final submission audit.
 
 ## Evidence classifications
 

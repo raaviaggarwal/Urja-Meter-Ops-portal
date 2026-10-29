@@ -320,7 +320,7 @@
     "/api/transformers": {
       "get": {
         "summary": "List Transformers",
-        "description": "Provide transformer-derived information from the meter dataset.\n\nThis endpoint does not fabricate capacities or electrical ratings; it\nexposes the hierarchy information that is available from the meter\nrecords. Each unique DT (distribution transformer) appearing in the\ndataset is listed with its associated zone, circle, subdivision,\nsubstation, and feeder codes/names as observed in the data.\n\nThe response format is intentionally lightweight — it reflects what\ncan be derived from the 403-record export without making assumptions\nabout fields that are not present.",
+        "description": "Provide transformer-derived information from the meter dataset.\n\nThis endpoint does not fabricate capacities or electrical ratings; it\nexposes the hierarchy information that is available from the meter\nrecords. Each unique DT (distribution transformer) appearing in the\ndataset is listed with its associated zone, circle, subdivision,\nsubstation, and feeder codes/names as observed in the data.\n\nThe response format is intentionally lightweight — it reflects what\ncan be derived from the loaded dataset without making assumptions\nabout fields that are not present.",
         "operationId": "list_transformers_api_transformers_get",
         "responses": {
           "200": {
@@ -349,7 +349,7 @@
     "/api/export/meters": {
       "get": {
         "summary": "Export Meters",
-        "description": "Return the verified meter dataset.\n\nThis endpoint returns the 403-record export that lives alongside the\nAPI code. It documents the known discrepancy with the portal UI (405\nmeters displayed vs. 403 records exported) without inventing the\nmissing records or their reason.",
+        "description": "Return the records from the loaded local dataset.\n\nThis endpoint does not retrieve or refresh data from the portal.",
         "operationId": "export_meters_api_export_meters_get",
         "responses": {
           "200": {
@@ -387,6 +387,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MeterDatasetMetadata"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIErrorResponse"
                 }
               }
             }
@@ -497,7 +507,7 @@
     "/api/hierarchy": {
       "get": {
         "summary": "Get Hierarchy",
-        "description": "Reconstructed meter network hierarchy from the exported dataset.\n\nReturns a nested tree showing zones → circles → divisions → subdivisions\n→ substations → feeders → distribution transformers (DTs), with meter\ncounts at each level and sample meterIds.\n\nQuery parameters:\n- zone_code: optional filter to a specific zone code\n\nResponse format:\n- zones: dict of zone_name → {code, circles: dict}\n- total_records: total meters in the dataset (403)",
+        "description": "Reconstructed meter network hierarchy from the exported dataset.\n\nReturns a nested tree showing zones → circles → divisions → subdivisions\n→ substations → feeders → distribution transformers (DTs), with meter\ncounts at each level and sample meterIds.\n\nQuery parameters:\n- zone_code: optional filter to a specific zone code\n\nResponse format:\n- zones: dict of zone_name → {code, circles: dict}\n- total_records: total meters in the loaded dataset",
         "operationId": "get_hierarchy_api_hierarchy_get",
         "parameters": [
           {
