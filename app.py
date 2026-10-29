@@ -502,24 +502,26 @@ async def list_meters(
     # Start with the full set of meterIds
     meter_ids: List[str] = list(_by_id.keys())
 
-    # Apply filters
+    # Apply every supplied filter cumulatively (AND semantics). Each filter
+    # narrows the current result set instead of replacing it.
     if status:
-        meter_ids = _by_status.get(status, [])
-    elif phase_type:
-        meter_ids = _by_phase.get(phase_type, [])
-    elif build:
-        meter_ids = _by_build.get(build, [])
-
-    # Hierarchy filters (AND-combined with each other and with prior filters)
+        allowed = set(_by_status.get(status, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
+    if phase_type:
+        allowed = set(_by_phase.get(phase_type, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
+    if build:
+        allowed = set(_by_build.get(build, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
     if zone_code:
-        meter_ids = _by_zone.get(zone_code, [])
+        allowed = set(_by_zone.get(zone_code, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
     if division_code:
-        meter_ids = _by_division.get(division_code, [])
+        allowed = set(_by_division.get(division_code, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
     if dt_code:
-        meter_ids = _by_dt.get(dt_code, [])
-    if zone_code and division_code:
-        # When both zone and division are provided, intersect the two lists
-        meter_ids = [mid for mid in meter_ids if mid in _by_division.get(division_code, [])]
+        allowed = set(_by_dt.get(dt_code, []))
+        meter_ids = [mid for mid in meter_ids if mid in allowed]
 
     # Search filter (applied after the above so it can further narrow results)
     if search:
@@ -741,8 +743,8 @@ async def get_metadata() -> dict:
     },
 )
 async def nearby_meters(
-    latitude: float = Query(..., ge=-90, le=90, description="Latitude in decimal degrees, -90 to 90"),
-    longitude: float = Query(..., ge=-180, le=180, description="Longitude in decimal degrees, -180 to 180"),
+    latitude: float = Query(..., json_schema_extra={"minimum": -90, "maximum": 90}, description="Latitude in decimal degrees, -90 to 90"),
+    longitude: float = Query(..., json_schema_extra={"minimum": -180, "maximum": 180}, description="Longitude in decimal degrees, -180 to 180"),
     radius_km: float = Query(..., gt=0, le=500, description="Search radius in kilometres"),
 ) -> dict:
     """Find meters near a given location using the Haversine formula.

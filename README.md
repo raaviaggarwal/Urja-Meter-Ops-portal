@@ -57,9 +57,11 @@ an existing file. `meter-export.json` is ignored by Git.
 
 The application requires a `meter-export.json` file beside `app.py`. On
 import, it validates the dataset using the ingestion validator. A missing,
-unreadable, malformed, or invalid dataset causes application startup to fail
-with a record/field diagnostic; it is never silently replaced with an empty
-dataset. No environment variables or portal credentials are required.
+unreadable, malformed, or invalid dataset does not crash the process; the
+validation diagnostic is logged and the service starts with an empty dataset
+snapshot. Data routes then operate on that empty snapshot until a valid file
+is supplied and the process is restarted. No environment variables or portal
+credentials are required.
 
 The API loads one validated dataset snapshot when the application module is
 imported. `/api/metadata` reports the source file's modification time captured
@@ -116,7 +118,7 @@ run the tests from the repository root:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pytest -q
+python -m pytest tests/ -q
 ```
 
 ## API routes
@@ -230,7 +232,7 @@ The complete suite covers API behavior, ingestion, dataset loading, combined
 filters, and OpenAPI consistency:
 
 ```bash
-python -m pytest -q
+python -m pytest tests/ -q
 ```
 
 On 2026-10-28, the complete suite passed with **41 passed and no warnings** in

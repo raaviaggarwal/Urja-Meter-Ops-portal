@@ -214,9 +214,8 @@ the local file was produced by the portal's current export behavior.
 
 ## 7. Earlier investigation notes and limitations
 
-`docs/PHASE1_INVESTIGATION.md`, `docs/API_DESIGN.md`, `README.md`,
-`Final_Report.md`, `BLOCKER_REPORT.md`, `AUDIT_OUTPUT.md`, and
-`audit_output.txt` contain historical claims. They are not independent
+`docs/API_DESIGN.md`, `README.md`, `Final_Report.md`, and
+`AUDIT_OUTPUT.md` contain historical claims. They are not independent
 evidence by themselves. In particular:
 
 - Some notes label authentication details as verified while also saying that
@@ -227,8 +226,8 @@ evidence by themselves. In particular:
   not confirmed portal endpoints.
 - Local application test results verify the local API against the export; they
   do not prove live portal protocol behavior.
-- `docs/PHASE1_INVESTIGATION.md` claims that authenticated portal responses
-  were HTML-only and records `/(portal)/...` route strings as request paths.
+- Earlier investigation notes claim that authenticated portal responses
+  were HTML-only and record `/(portal)/...` route strings as request paths.
   The Phase 2.1 capture instead observed JSON requests at the paths listed in
   section 3; treat the older request-format and path claims as unverified or
   superseded by this capture.
